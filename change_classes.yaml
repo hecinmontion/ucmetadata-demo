@@ -1,0 +1,38 @@
+# The two-track change-approval declaration (spec: F-PLATFORM-001, Rules & Constraints
+# "changes come in two kinds and take two different review paths"; ADR-006). This file
+# is the one place that split is declared -- `src/uc_metadata/change_routing.py` reads
+# it to classify a change request's changed file paths mechanically, so which path a
+# change takes is never argued per change request.
+#
+# Patterns are matched with `pathlib.PurePosixPath.match`-style globs (see
+# `change_routing.py`) against paths relative to the repository root, forward-slash
+# separated, e.g. `contracts/workspace.sales.orders.yaml`.
+#
+# This file is itself a schema/tooling artifact: changing what it declares changes
+# what review path *every other change* gets routed through, so it is listed under
+# `schema` below, not `content`. Bumping the version comment when the pattern set
+# changes is a courtesy for a reviewer, not something any code reads.
+
+# content: a data team editing its own contract's descriptions, classifications,
+# term links, certification claim or refresh commitments -- the fast, pre-approved
+# path (code owners for that contract only, no platform release review).
+content:
+  - "contracts/**/*.yaml"
+
+# Carved out of `content` above: these look like they live under `contracts/`, but
+# are platform-owned shape, not team-owned data, so they route to `schema` even
+# though the glob above would otherwise match them. `change_routing.py` applies
+# these exclusions before matching `content`.
+content_exclude:
+  - "contracts/_schema/**"
+  - "contracts/_template.yaml"
+
+# schema: adding a field every contract could then carry, changing an allowed value
+# of a controlled list, or any other change that could break an existing contract or
+# the tooling that reads it -- the platform team's slow path (release review, a
+# semver tag, a migration plan for every contract already in the repository).
+schema:
+  - "contracts/_schema/**"
+  - "contracts/_template.yaml"
+  - "src/uc_metadata/models.py"
+  - "change_classes.yaml"
