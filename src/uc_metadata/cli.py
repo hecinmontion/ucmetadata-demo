@@ -37,6 +37,13 @@ checks passed -- is what actually satisfies the deferred Rules & Constraints
 requirement, "every change request prints the full set of catalogue writes it
 would perform before it can be merged": a reviewer sees both what's wrong and
 exactly what would land if it were merged as-is.
+
+`coverage`'s `-o`/`--output` writes JSON only -- rendering that JSON into the
+static HTML dashboard (spec: `dashboard/app.py` build verdict) is deliberately
+`dashboard/app.py`, a separate script run afterwards, not a `--html` flag added
+here. Six-verb wiring plus HTML templating in one module would cost this file the
+thing its own docstring calls out ("pure wiring ... no business logic lives
+here"); see `dashboard/app.py`'s module docstring for the full reasoning.
 """
 
 from __future__ import annotations
@@ -395,7 +402,16 @@ def _add_coverage_parser(subparsers) -> None:
         default=str(_DEFAULT_CONTRACTS_DIR),
         help=f"Directory of contract YAML files to scan (default: {_DEFAULT_CONTRACTS_DIR}).",
     )
-    parser.add_argument("-o", "--output", help="Path to write the coverage report as JSON, for the dashboard phase.")
+    parser.add_argument(
+        "-o",
+        "--output",
+        help=(
+            "Path to write the coverage report as JSON. Feed this file to "
+            "`python dashboard/app.py <this-path>` to render the static HTML dashboard -- "
+            "rendering deliberately stays a separate script, not a flag here; see dashboard/app.py's "
+            "module docstring for why."
+        ),
+    )
     _add_client_args(parser)
     parser.set_defaults(handler=_cmd_coverage)
 
