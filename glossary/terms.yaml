@@ -1,0 +1,67 @@
+# Sample business glossary — 8-12 terms relevant to the three seeded demo tables
+# (workspace.analytics.customers, workspace.marketing.campaigns,
+# workspace.analytics.orders; see scripts/seed_demo_data.sql).
+#
+# Stands in for a real glossary system owned by the data office (spec Glossary:
+# "Business term"; Out of Scope: "Business glossary curation ... represented by a
+# small realistic sample"). `src/uc_metadata/glossary.py` loads this file so
+# propose.py (a later phase) can retrieve relevant terms and pass them as context
+# to the AI drafter -- a proposed `business_term` link on a column must resolve to
+# a real key in this file, not be invented by the drafter.
+#
+# Format: a flat mapping of `term_slug: definition`. One file rather than one file
+# per term, because 8-12 short entries read and diff more naturally as a single
+# small reviewable document than as a directory of one-liners, and it mirrors the
+# other small single-file YAML stand-ins this repo already uses for mock data
+# sources (dq_registry.yaml, change_classes.yaml).
+
+customer: >-
+  An individual or organization that has created an account on the platform and
+  may place one or more orders. Distinct from a lead, which has not yet signed up.
+
+email: >-
+  A customer's primary electronic contact address, used for account communication
+  and order confirmations. Treated as personally identifiable information (PII).
+
+lifetime_value: >-
+  The total historical revenue attributed to one customer across all of their
+  orders to date, in the platform's base currency (USD). Not a forecast.
+
+region: >-
+  The coarse geographic market a customer or order is associated with (e.g. EMEA,
+  APAC, LATAM), used for regional reporting and routing -- not a legal
+  jurisdiction.
+
+campaign: >-
+  A time-bounded marketing initiative with its own budget, start and end date,
+  run through exactly one channel, intended to drive signups or orders.
+
+channel: >-
+  The marketing or sales route through which a customer was reached or an order
+  was placed (e.g. email, social, search, web, mobile). Shared vocabulary across
+  marketing and order data, and should mean the same thing in both.
+
+budget: >-
+  The amount of spend approved for a campaign, in the platform's base currency
+  (USD), fixed at campaign creation and not reforecast mid-campaign.
+
+order: >-
+  A single purchase transaction placed by one customer at one point in time, with
+  its own amount, status and channel.
+
+order_status: >-
+  The current lifecycle state of an order (e.g. pending, shipped, refunded).
+  Distinct from a US state abbreviation -- some legacy columns confusingly share
+  a name ("state") with the latter; see the orders table's own column notes.
+
+amount: >-
+  The total monetary value of one order, in the platform's base currency (USD),
+  inclusive of any discounts already applied.
+
+signup_date: >-
+  The calendar date a customer's account was created. Not the date of their first
+  order, which may be later, or may never happen.
+
+certification_tier: >-
+  A coarse trust label (bronze, silver, gold) earned from evidence -- ownership,
+  description coverage, and passing data-quality rules -- never self-declared.
