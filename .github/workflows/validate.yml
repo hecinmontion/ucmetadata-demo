@@ -1,0 +1,130 @@
+# Change-request gate (spec: F-PLATFORM-001, Dependencies -> Build verdicts,
+# ".github/workflows/validate.yml"; Rules & Constraints "every change request
+# prints the full set of catalogue writes it would perform before it can be
+# merged" and "which path a change takes is decided mechanically").
+#
+# Credential-free by design, not by oversight: every `ucmeta` invocation below
+# omits `--live`, so it runs against `FakeUCClient` (the CLI's own default --
+# see `src/uc_metadata/cli.py`'s module docstring), never against a real
+# Databricks workspace. This is a public repository demonstrating a real
+# interview submission; storing hector's personal Free Edition OAuth profile
+# as a public-repo GitHub Actions secret would be bad security practice, and
+# it would make this workflow fail for anyone who forks the repo without that
+# account. The live, `--live`-flagged loop against the real workspace is a
+# local, human-run demonstration (already proven in a prior phase's end-to-end
+# smoke test) -- this workflow instead proves the CI *mechanism* is real and
+# reproducible: the routing step, the validate gate, the exit codes. Anyone
+# who clones this repo and opens a PR gets the exact same, real CI run.
+name: validate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "contracts/**"
+      - "change_classes.yaml"
+      - "src/uc_metadata/**"
+      - "cli/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/validate.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR
+        uses: actions/checkout@v4
+        with:
+          # Full history for both the PR base and head commits, so the
+          # `git diff` below (base SHA...head SHA) has both objects locally --
+          # the default shallow (depth-1) checkout only has the merge commit.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11" # pyproject.toml: requires-python = ">=3.11"
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      # ---- changed-file discovery -------------------------------------------
+      # Mechanism: `git diff --name-only <base sha>...<head sha>` (three-dot,
+      # i.e. diffed against the merge base of the two, matching what GitHub's
+      # own PR "Files changed" view computes -- not affected by unrelated
+      # commits landing on main after the branch was opened). Both SHAs come
+      # straight from the pull_request event payload
+      # (github.event.pull_request.base.sha / .head.sha), not from `github.sha`
+      # (which for pull_request events is the synthetic merge commit, not the
+      # PR's actual head). This only works because of `fetch-depth: 0` above --
+      # both commits must exist locally for `git diff` to resolve them.
+      - name: List changed paths
+        id: changed
+        run: |
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          git diff --name-only "${base_sha}...${head_sha}" > changed_paths.txt
+          echo "Changed paths in this PR:"
+          cat changed_paths.txt
+          count=$(wc -l < changed_paths.txt | tr -d ' ')
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+      # ---- ADR-006 routing: mechanical, not argued per change request -------
+      - name: Classify change (content vs. schema) -- ADR-006 routing
+        if: steps.changed.outputs.count != '0'
+        run: |
+          uv run python - <<'PY'
+          from uc_metadata.change_routing import classify_change
+
+          with open("changed_paths.txt") as f:
+              paths = [line.strip() for line in f if line.strip()]
+
+          change_class = classify_change(paths)
+          print(f"Change class: {change_class} ({len(paths)} changed path(s))")
+          if change_class == "content":
+              print("Fast path: content edit, pre-approved by class, code owners only.")
+          else:
+              print("Slow path: schema/tooling change, platform release review required.")
+          # A GitHub Actions log annotation, so the routing decision is visible
+          # on the PR's checks tab without opening the raw log.
+          print(f"::notice title=Change class::{change_class}")
+          PY
+
+      # ---- validate every changed contract, print every planned write -------
+      # Excludes contracts/_schema/** and contracts/_template.yaml -- platform
+      # artifacts, not authored contracts, same carve-out change_classes.yaml's
+      # content_exclude declares.
+      - name: Find changed contract files
+        id: contracts
+        run: |
+          grep -E '^contracts/.*\.yaml$' changed_paths.txt \
+            | grep -v '^contracts/_schema/' \
+            | grep -v '^contracts/_template\.yaml$' \
+            > changed_contracts.txt || true
+          echo "Changed contract files:"
+          cat changed_contracts.txt || echo "(none)"
+          count=$(wc -l < changed_contracts.txt | tr -d ' ')
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+      - name: ucmeta validate each changed contract
+        if: steps.contracts.outputs.count != '0'
+        run: |
+          failures=0
+          while IFS= read -r contract; do
+            echo "::group::ucmeta validate ${contract}"
+            uv run ucmeta validate "${contract}" || failures=1
+            echo "::endgroup::"
+          done < changed_contracts.txt
+          exit "${failures}"
+
+      # ---- the automated test suite ------------------------------------------
+      # `-m "not uc_live and not llm_live"` excludes the two marker families
+      # that need real credentials this workflow deliberately does not have
+      # (see pyproject.toml's marker definitions): `uc_live` needs the `ucmeta`
+      # Databricks OAuth profile, `llm_live` needs ANTHROPIC_API_KEY. Everything
+      # else runs against FakeUCClient / recorded LLM fixtures, so it needs no
+      # network and no secret at all.
+      - name: Run unit tests
+        run: uv run pytest tests/unit -m "not uc_live and not llm_live"

@@ -1,0 +1,113 @@
+# Apply-on-merge gate (spec: F-PLATFORM-001, Dependencies -> Build verdicts,
+# ".github/workflows/apply.yml"; Rules & Constraints "apply runs only on merge
+# to the main branch -- change requests may validate and dry-run, never
+# apply"). This workflow is the forcing function `validate.yml` alone cannot
+# be: it demonstrates apply wired to `main`, not to a manually clicked button.
+#
+# Credential-free by design, not by oversight: `ucmeta apply` below omits
+# `--live`, so every write in this workflow lands on `FakeUCClient` (the
+# CLI's own default), never on a real Databricks workspace. This is a public
+# repository demonstrating a real interview submission; a personal Free
+# Edition OAuth profile has no business being a public-repo GitHub Actions
+# secret, and requiring one would break this workflow for any fork. What this
+# workflow proves is the apply-on-merge *mechanism* -- the gate fires on push
+# to main, resolves exactly the contracts that changed, and fails the job if
+# any of them doesn't fully apply -- reproducibly, for anyone who forks this
+# repo, with zero setup.
+#
+# Honest gap, named rather than glossed over: in a real deployment, this is
+# where `--live` (or an environment-appropriate real UCClient) would run
+# against the target organisation's actual Unity Catalog workspace, gated by
+# a real service-principal credential stored as a proper CI secret (an
+# OAuth machine-to-machine identity, per the spec's Security section -- never
+# a long-lived personal access token). That production wiring is not built
+# here; this workflow demonstrates the gate mechanism against the reproducible
+# in-repo fake, not a production write.
+name: apply
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          # Full history so the pre-push SHA (github.event.before) is
+          # resolvable locally -- see the changed-file diff step below.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11" # pyproject.toml: requires-python = ">=3.11"
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      # ---- changed-file discovery --------------------------------------------
+      # Mechanism: `git diff --name-only <before>..<after>`, where `before`/
+      # `after` come from the push event payload (github.event.before is the
+      # branch tip before this push landed, github.event.after == github.sha).
+      # This is the merge commit's actual parent for an ordinary merge, but
+      # unlike `HEAD^` it also does the right thing for a squash-merge or a
+      # multi-commit fast-forward push, since it reflects everything the push
+      # actually moved main by, not just the immediate parent commit.
+      #
+      # `github.event.before` is the all-zero SHA on a branch's very first
+      # push (not expected for `main` in this repository, which already has
+      # history) -- guarded below rather than assumed away.
+      - name: List changed paths
+        id: changed
+        run: |
+          before_sha="${{ github.event.before }}"
+          after_sha="${{ github.event.after }}"
+          zero_sha="0000000000000000000000000000000000000000"
+          if [ "${before_sha}" = "${zero_sha}" ]; then
+            echo "No previous commit to diff against (first push to main); nothing to apply."
+            : > changed_paths.txt
+          else
+            git diff --name-only "${before_sha}" "${after_sha}" > changed_paths.txt
+          fi
+          echo "Changed paths in this push:"
+          cat changed_paths.txt
+
+      # Same carve-out as validate.yml: contracts/_schema/** and
+      # contracts/_template.yaml are platform artifacts, not authored
+      # contracts, and are never applied.
+      - name: Find changed contract files
+        id: contracts
+        run: |
+          grep -E '^contracts/.*\.yaml$' changed_paths.txt \
+            | grep -v '^contracts/_schema/' \
+            | grep -v '^contracts/_template\.yaml$' \
+            > changed_contracts.txt || true
+          echo "Changed contract files:"
+          cat changed_contracts.txt || echo "(none)"
+          count=$(wc -l < changed_contracts.txt | tr -d ' ')
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+      # `--approved-by` names the human whose approval authorizes this apply
+      # (apply.py's own precondition). `github.actor` is the account that
+      # triggered this workflow run -- for a push produced by merging a PR
+      # through the GitHub UI, that is the person who clicked merge, which is
+      # the closest identity GitHub Actions exposes to "who approved this
+      # change landing on main" without a second API call to resolve the PR's
+      # reviewers.
+      - name: ucmeta apply each changed contract
+        if: steps.contracts.outputs.count != '0'
+        run: |
+          failures=0
+          while IFS= read -r contract; do
+            echo "::group::ucmeta apply ${contract}"
+            uv run ucmeta apply "${contract}" --approved-by "${{ github.actor }}" || failures=1
+            echo "::endgroup::"
+          done < changed_contracts.txt
+          exit "${failures}"
+
+      - name: No contracts changed
+        if: steps.contracts.outputs.count == '0'
+        run: echo "No contract files changed in this push; nothing to apply."

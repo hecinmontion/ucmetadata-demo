@@ -1,0 +1,59 @@
+# Scheduled coverage recompute + publish (spec: F-PLATFORM-001, Dependencies ->
+# Build verdicts, ".github/workflows/coverage.yml": "proves coverage is a
+# running process rather than a one-off screenshot").
+#
+# Credential-free by design, not by oversight: `ucmeta coverage` below omits
+# `--live`, so it runs against `FakeUCClient`. Coverage's fill-rate math reads
+# contract YAML content directly -- owner, description, sensitivity, DQ-rule
+# fields already present in the file -- so it needs no live catalogue access
+# at all, fake or real, to compute correctly. (This is a stronger case for
+# no-credentials-needed than validate.yml/apply.yml make, not the same
+# workaround repeated a third time.) Honest gap, same as the other two
+# workflows: a production deployment's DQ-*evidence certification* checks
+# (validate.py's not-yet-wired certification-vs-evidence check, per
+# apply.py's docstring) would need `--live` and a real service-principal
+# credential to certify against live quality-check results, not just contract
+# content -- named here rather than glossed over.
+name: coverage
+
+on:
+  schedule:
+    # Nightly, 06:00 UTC. Cron, not a webhook -- this is a scheduled recompute,
+    # not a reaction to a specific change.
+    - cron: "0 6 * * *"
+  workflow_dispatch: {} # manual trigger, for demoing this workflow on demand
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11" # pyproject.toml: requires-python = ">=3.11"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: ucmeta coverage
+        run: uv run ucmeta coverage contracts/ -o coverage_report.json
+
+      # Published as a downloadable workflow artifact rather than to GitHub
+      # Pages. GitHub Pages (actions/upload-pages-artifact +
+      # actions/deploy-pages) was the strawman's original plan, but it needs a
+      # Pages environment enabled on the repository, its own permissions
+      # block, and a separate deploy job -- meaningfully more setup than this
+      # ten-day prototype's coverage story needs to prove the point ("coverage
+      # is computed on a schedule, not screenshotted once"). A plain artifact
+      # upload proves exactly that with three lines of YAML; wiring an actual
+      # dashboard page is `dashboard/app.py`'s job in a later phase, not this
+      # workflow's.
+      - name: Publish coverage report as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage_report.json
+          retention-days: 30
