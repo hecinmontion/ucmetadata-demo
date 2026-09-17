@@ -1,0 +1,32 @@
+# Pinned schema-version-1 baseline: the minimal shape a v1 contract could carry
+# before propose has ever run — no dataset.sensitivity, and columns with no
+# description/business_term/pii/sensitivity/tags at all (a freshly harvested
+# skeleton, per the Behaviour section: "the human judgments left blank").
+#
+# This fixture must keep loading, unmodified, under every future revision of
+# src/uc_metadata/models.py for as long as `version: 1` stays a supported value.
+# It is the backwards-compatibility canary: when a v2 schema is introduced, this
+# file is what proves v1 documents didn't quietly stop working.
+version: 1
+
+dataset:
+  qualifier:
+    catalog: workspace
+    schema: sales
+    table: orders
+  owner:
+    business_application_id: BA-01234
+  refresh:
+    cadence: daily
+    sla_minutes: 120
+  retention_days: 730
+  certification: bronze
+  description: Order header records for the direct-to-consumer storefront.
+
+columns:
+  - name: order_id
+    data_type: bigint
+    nullable: false
+  - name: customer_email
+    data_type: string
+    nullable: true

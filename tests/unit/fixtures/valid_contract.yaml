@@ -1,0 +1,58 @@
+# Fully reviewed contract: no field anywhere carries ai_proposed: true. Used for the
+# YAML -> Pydantic -> YAML round-trip test and for enum-validation checks.
+version: 1
+
+dataset:
+  qualifier:
+    catalog: workspace
+    schema: sales
+    table: orders
+  owner:
+    business_application_id: BA-01234
+  refresh:
+    cadence: daily
+    sla_minutes: 120
+  retention_days: 730
+  certification: silver
+  description: >-
+    Order header records for the direct-to-consumer storefront, one row per order.
+  sensitivity:
+    value: internal
+    ai_proposed: false
+
+columns:
+  - name: order_id
+    data_type: bigint
+    nullable: false
+    partition_key: false
+    description:
+      value: Surrogate primary key for the order.
+      ai_proposed: false
+    business_term:
+      value: order-identifier
+      ai_proposed: false
+    pii:
+      value: false
+      ai_proposed: false
+    sensitivity:
+      value: internal
+      ai_proposed: false
+    tags: []
+
+  - name: customer_email
+    data_type: string
+    nullable: true
+    partition_key: false
+    description:
+      value: Email address the order confirmation was sent to.
+      ai_proposed: false
+    business_term:
+      value: customer-contact-email
+      ai_proposed: false
+    pii:
+      value: true
+      ai_proposed: false
+    sensitivity:
+      value: confidential
+      ai_proposed: false
+    tags: []

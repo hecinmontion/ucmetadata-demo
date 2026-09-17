@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hector/uc-metadata-platform/contracts/_schema/contract.schema.json",
+  "$comment": "Schema definition revision 1 (this file's own maintenance history, tracked separately from the `version` property below, which is what each *contract instance* declares itself conformant with). Bumping either one is a schema/tooling change and takes the slow path in ADR-006: platform release review, a semantic version tag, and a migration plan for every contract already in the repository. Pydantic models in src/uc_metadata/models.py are hand-kept in sync with this file field-for-field; see that module's docstring for which of the two is the enforced source of truth at runtime.",
+  "title": "UC Metadata Contract",
+  "description": "One human-readable, version-controlled file per dataset holding everything the platform and its consumers need to know about that dataset: ownership, refresh commitments, retention, certification tier, sensitivity, and a description per column (see Glossary: Contract in specs/F-PLATFORM-001-uc-metadata-contracts.md).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "dataset", "columns"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [1],
+      "description": "Contract schema version this document conforms to. A contract written against a newer schema than a given tool understands must fail loudly rather than silently drop fields."
+    },
+    "dataset": { "$ref": "#/$defs/dataset" },
+    "columns": {
+      "type": "array",
+      "description": "One entry per column. Harvested facts (name, data_type, nullable, partition_key) are never hand-authored; the judgment fields (description, business_term, pii, sensitivity) are proposed by the AI drafter and reviewed by a human.",
+      "items": { "$ref": "#/$defs/column" }
+    }
+  },
+  "$defs": {
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["qualifier", "owner", "refresh", "retention_days", "certification", "description"],
+      "properties": {
+        "qualifier": { "$ref": "#/$defs/qualifier" },
+        "owner": { "$ref": "#/$defs/ownerPointer" },
+        "refresh": { "$ref": "#/$defs/refresh" },
+        "retention_days": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "Human-declared retention commitment, in days."
+        },
+        "certification": {
+          "$ref": "#/$defs/certificationTier",
+          "description": "Earned from dq_registry.yaml evidence at validate time, not self-declared."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-declared dataset summary. Never AI-authored, so it carries no ai_proposed marker."
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/proposedSensitivity",
+          "description": "AI-suggested, human-decided dataset-level sensitivity classification. Absent until propose has run; present without ai_proposed:false blocks apply."
+        }
+      }
+    },
+    "qualifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["catalog", "schema", "table"],
+      "description": "The dataset's three-part Unity Catalog identity. Harvested, never hand-authored.",
+      "properties": {
+        "catalog": { "type": "string", "minLength": 1 },
+        "schema": { "type": "string", "minLength": 1 },
+        "table": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ownerPointer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["business_application_id"],
+      "description": "Ownership recorded as a reference to the authoritative upstream system, never copied as a free-text value (Glossary: Owner pointer). Resolved to a team, solution owner and contact channel by owner_registry.resolve_owner(...) at read time, not stored here.",
+      "properties": {
+        "business_application_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "refresh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cadence", "sla_minutes"],
+      "properties": {
+        "cadence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-declared refresh commitment, e.g. 'hourly', 'daily', 'weekly'. Declared, never measured (Out of Scope: Freshness observation)."
+        },
+        "sla_minutes": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "Minutes after the cadence boundary the refresh is due before it counts as a breach."
+        }
+      }
+    },
+    "certificationTier": {
+      "type": "string",
+      "enum": ["bronze", "silver", "gold"]
+    },
+    "sensitivityLevel": {
+      "type": "string",
+      "enum": ["public", "internal", "confidential", "strictly_confidential"]
+    },
+    "proposedBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "ai_proposed"],
+      "description": "Base shape of the AI-proposed / unreviewed marker (Glossary: AI-proposed / unreviewed marker). ai_proposed:true means the value came from the AI drafter and no named human has accepted it yet; apply refuses a contract whole if any field still carries it (SC-001-03).",
+      "properties": {
+        "value": true,
+        "ai_proposed": { "type": "boolean" },
+        "note": {
+          "type": ["string", "null"],
+          "description": "Set by the drafter when it had to guess between two plausible meanings, so a reviewer's attention lands where it matters. Never set on a human-authored value."
+        }
+      }
+    },
+    "proposedDescription": {
+      "allOf": [{ "$ref": "#/$defs/proposedBase" }],
+      "properties": { "value": { "type": "string", "minLength": 1 } }
+    },
+    "proposedBusinessTerm": {
+      "allOf": [{ "$ref": "#/$defs/proposedBase" }],
+      "properties": { "value": { "type": "string", "minLength": 1 } }
+    },
+    "proposedPii": {
+      "allOf": [{ "$ref": "#/$defs/proposedBase" }],
+      "properties": { "value": { "type": "boolean" } }
+    },
+    "proposedSensitivity": {
+      "allOf": [{ "$ref": "#/$defs/proposedBase" }],
+      "properties": { "value": { "$ref": "#/$defs/sensitivityLevel" } }
+    },
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "data_type", "nullable"],
+      "description": "name, data_type, nullable and partition_key are harvested facts. description, business_term, pii and sensitivity are judgment fields, absent until propose has run and each wrapped in the AI-proposed marker while unreviewed.",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "data_type": { "type": "string", "minLength": 1 },
+        "nullable": { "type": "boolean" },
+        "partition_key": { "type": "boolean", "default": false },
+        "description": { "$ref": "#/$defs/proposedDescription" },
+        "business_term": {
+          "$ref": "#/$defs/proposedBusinessTerm",
+          "description": "Must resolve to a real glossary/ entry once accepted; not enforced at the schema level."
+        },
+        "pii": { "$ref": "#/$defs/proposedPii" },
+        "sensitivity": { "$ref": "#/$defs/proposedSensitivity" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    }
+  }
+}

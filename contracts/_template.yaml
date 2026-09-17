@@ -1,0 +1,88 @@
+# UC Metadata Contract — starter template
+#
+# Copy this file to `contracts/<catalog>.<schema>.<table>.yaml` and fill it in. Every
+# field a contract may carry is present below, with a comment explaining what it
+# means and where it comes from. Validated against contracts/_schema/contract.schema.json
+# and src/uc_metadata/models.py:Contract.
+#
+# Two kinds of field appear here:
+#   1. Harvested facts (qualifier, column name/data_type/nullable/partition_key) —
+#      `ucmeta harvest` fills these in from the catalogue. Never hand-type them;
+#      re-run harvest to refresh them instead.
+#   2. Judgment fields (dataset.sensitivity; column description, business_term, pii,
+#      sensitivity) — `ucmeta propose` drafts these, and a human reviews them. Each
+#      one the AI wrote is a small object: a `value`, an `ai_proposed` flag, and an
+#      optional `note` the drafter leaves when it had to guess between two plausible
+#      meanings. A human-authored value has the same shape but `ai_proposed: false` —
+#      flipping that flag is what "review" means in this repository. Apply refuses
+#      the whole contract if any field is still `ai_proposed: true` (SC-001-03).
+
+version: 1  # contract schema version this file conforms to
+
+dataset:
+  qualifier:                    # harvested — the dataset's three-part Unity Catalog name
+    catalog: workspace
+    schema: sales
+    table: orders
+
+  owner:                        # a pointer, not a name — resolved via owner_registry.resolve_owner(...)
+    business_application_id: BA-01234
+
+  refresh:
+    cadence: daily               # human-declared commitment: hourly | daily | weekly | ...
+    sla_minutes: 120              # minutes past the cadence boundary before it counts as a breach
+
+  retention_days: 730             # human-declared retention commitment, in days
+
+  certification: silver           # bronze | silver | gold — earned from dq_registry.yaml evidence, not self-declared
+
+  description: >                  # human-declared dataset summary, never AI-authored
+    Order header records for the direct-to-consumer storefront, one row per order.
+
+  sensitivity:                    # AI-suggested, human-decided — dataset-level sensitivity
+    value: internal                # public | internal | confidential | strictly_confidential
+    ai_proposed: false              # cleared: a human reviewed and accepted this classification
+                                     # (sensitivity changes need a second, distinct approver)
+
+columns:
+  - name: order_id                 # harvested
+    data_type: bigint               # harvested
+    nullable: false                  # harvested
+    partition_key: false              # harvested
+    description:
+      value: "Surrogate primary key for the order."
+      ai_proposed: false              # reviewed and accepted
+    business_term:
+      value: order-identifier
+      ai_proposed: false
+    pii:
+      value: false
+      ai_proposed: false
+    sensitivity:
+      value: internal
+      ai_proposed: false
+    tags: []
+
+  - name: customer_email            # harvested
+    data_type: string
+    nullable: true
+    partition_key: false
+    description:
+      value: "Email address the order confirmation was sent to."
+      ai_proposed: true              # still AI-proposed — a human must review this before merge
+      note: >-
+        Guessed this is the confirmation address rather than the account's primary
+        email; the column name and sample values don't distinguish the two.
+    business_term:
+      value: customer-contact-email
+      ai_proposed: true
+    pii:
+      value: true
+      ai_proposed: true
+    sensitivity:
+      value: confidential
+      ai_proposed: true
+      note: >-
+        Flagged as personal data (an email address). Sensitivity changes need a
+        second, distinct approver before this marker can be cleared.
+    tags: []
