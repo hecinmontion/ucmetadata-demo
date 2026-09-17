@@ -1,0 +1,23 @@
+# SIMULATED SAMPLE DATA -- not real consumption telemetry.
+#
+# This prototype has no downstream query log wired up (spec Out of Scope names the
+# analogous gap for freshness: "declared, not observed" -- no history introspection,
+# no metrics harvester -- and Rules & Constraints requires that "coverage is never
+# published without at least one outcome measure beside it", so an outcome measure
+# has to exist even though nothing real feeds it yet).
+#
+# These rows represent the shape a real telemetry feed would eventually supply: one
+# event per dataset, recording how many days after its contract was first applied a
+# new consumer ran their first useful query against it (Glossary: "Outcome measure
+# ... how long a new consumer takes to run their first useful query"). The values
+# are hand-picked to be plausible, not measured, and are never presented as fact --
+# `src/uc_metadata/coverage.py` labels every figure it derives from this file
+# "simulated" in `CoverageReport.outcome_measures`, end to end.
+
+events:
+  - full_name: workspace.analytics.customers
+    days_to_first_query: 1.5
+  - full_name: workspace.marketing.campaigns
+    days_to_first_query: 4.0
+  - full_name: workspace.analytics.orders
+    days_to_first_query: 9.0

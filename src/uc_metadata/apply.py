@@ -67,12 +67,13 @@ A caller that wants "did this fully apply" has exactly one field to check
 which state, never an opaque "apply failed" exception swallowing that detail.
 
 What this module does not yet do: `validate.py`'s certification-vs-evidence
-check is not built (it needs `dq_registry.yaml`/`coverage.py`, a later phase --
-see `validate.py`'s own docstring), so neither `validate()` nor `apply()` can
-refuse a tier claim the quality evidence does not support yet. Once that check
-exists in `validate.py`, `apply()` needs no change to pick it up -- it already
-refuses on any `validate()` failure, not on a hand-maintained list of which
-checks count.
+check is not wired in (`dq_registry.py`/`coverage.py` now exist and expose the
+pieces it needs -- see `coverage.py`'s "integration point for validate.py"
+note -- but `validate.py` does not call them yet), so neither `validate()` nor
+`apply()` can refuse a tier claim the quality evidence does not support yet.
+Once that check is wired into `validate.py`, `apply()` needs no change to pick
+it up -- it already refuses on any `validate()` failure, not on a
+hand-maintained list of which checks count.
 """
 
 from __future__ import annotations

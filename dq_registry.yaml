@@ -1,0 +1,52 @@
+# A small stand-in data-quality rule registry (spec: F-PLATFORM-001,
+# `dq_registry.yaml` build verdict -- "mock, light -- in scope"). Links metadata to
+# trust: it is what makes a certification tier earnable from evidence
+# (`src/uc_metadata/coverage.py`'s `tier_is_supported_by_evidence`) instead of
+# self-declared, and what makes the adversarial demo possible -- `campaigns` is
+# fully covered by contract metadata but two of its rows fail the rules below.
+#
+# Each rule names its target table (`full_name`, a `catalog.schema.table` three-part
+# name), a human `description`, and a `predicate`: a small boolean expression every
+# row is expected to satisfy. A row that does not satisfy it is a violation.
+# `src/uc_metadata/dq_registry.py` loads this file and evaluates each rule's
+# predicate in Python against rows read through `UCClient.sample_rows(...)` -- the
+# same predicate string, the same interpreter, for both `FakeUCClient` and
+# `RealUCClient`, so there is exactly one rule language rather than a SQL dialect
+# for one backend and a hand-written Python check for the other.
+#
+# Predicate grammar (deliberately small -- see `dq_registry.py`'s docstring for the
+# full grammar and its limits): one or more clauses joined by `AND`. Each clause is
+# either `<column> IS [NOT] NULL` or `<column> <op> <value_or_column>`, where `<op>`
+# is one of `>= <= != = > <`. No `OR`, no parentheses -- every rule below is a single
+# comparison, which is all three seeded demo tables need.
+
+rules:
+  - id: customers-email-present
+    full_name: workspace.analytics.customers
+    description: "Every customer row must have a non-null email address."
+    predicate: "email IS NOT NULL"
+
+  - id: customers-lifetime-value-non-negative
+    full_name: workspace.analytics.customers
+    description: "lifetime_value must never be negative."
+    predicate: "lifetime_value >= 0"
+
+  - id: campaigns-budget-non-negative
+    full_name: workspace.marketing.campaigns
+    description: "budget must never be negative."
+    predicate: "budget >= 0"
+
+  - id: campaigns-end-date-not-before-start-date
+    full_name: workspace.marketing.campaigns
+    description: "end_date must be on or after start_date."
+    predicate: "end_date >= start_date"
+
+  - id: orders-amount-non-negative
+    full_name: workspace.analytics.orders
+    description: "amount must never be negative."
+    predicate: "amount >= 0"
+
+  - id: orders-customer-id-present
+    full_name: workspace.analytics.orders
+    description: "Every order row must reference a customer_id."
+    predicate: "customer_id IS NOT NULL"

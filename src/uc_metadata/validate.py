@@ -24,10 +24,15 @@ collects every failure from all of them, rather than stopping at the first:
   not just by omission.
 - *Certification-vs-evidence* (Rules & Constraints: "a tier claim that the quality
   and coverage evidence does not support fails validation") is deliberately NOT
-  built here. It needs a data-quality/coverage evidence source (`dq_registry.yaml`,
-  `coverage.py`) that does not exist yet as of this phase. Wiring it in is that
-  later phase's job, and this module's docstring records the gap explicitly rather
-  than leaving it to be rediscovered.
+  built here. `dq_registry.py`/`coverage.py` (a later phase) now exist and expose
+  exactly the pieces this check needs: `dq_registry.evaluate_rules(full_name,
+  client)` and the pure function `coverage.tier_is_supported_by_evidence(contract,
+  dq_results)`. Wiring them in -- a new problem-collecting helper here, added to
+  `validate()`'s check list, plus its own test -- is left as a documented,
+  ready-to-wire integration point rather than done in that phase, since it is more
+  than the one-line addition that would justify doing it opportunistically; see
+  `coverage.py`'s "integration point for validate.py" note for the exact call
+  shape.
 
 What this module deliberately does not do: it does not print the exact catalogue
 writes a merge would perform (that is `apply.py`'s planning/dry-run function, a
