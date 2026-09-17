@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2",
     "pyyaml>=6",
     "jsonschema>=4",
+    "databricks-sdk>=0.30",
 ]
 
 [project.optional-dependencies]
@@ -31,4 +32,5 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 markers = [
     "scenario: binds a test to a scenario ID in specs/F-PLATFORM-001-uc-metadata-contracts.md",
+    "uc_live: exercises RealUCClient against the live Free Edition workspace; needs network and the ucmeta OAuth profile, gated by UC_LIVE_TESTS=1",
 ]

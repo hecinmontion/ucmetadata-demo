@@ -1,0 +1,359 @@
+"""The one seam every later module (`harvest.py`, `apply.py`) talks to for Unity
+Catalog reads and writes.
+
+`UCClient` is a `Protocol` describing that seam: list a table's columns and current
+comment, read its properties and tags, and write a comment, properties or tags back.
+Two implementations exist behind it (ADR-004): `RealUCClient`, a thin translation
+layer over `databricks-sdk` against the live Free Edition workspace, and
+`fake_uc.FakeUCClient`, a fast in-memory stand-in for unit tests. Neither module
+imports the other; both import this one, so `harvest.py`/`apply.py` can depend on
+`UCClient` alone and take either implementation as a constructor argument.
+
+Design decisions worth stating rather than leaving implicit:
+
+- Reads return `UCTable`/`UCColumn`, not `databricks-sdk`'s own `TableInfo`/
+  `ColumnInfo` dataclasses, so nothing above this module needs to know the SDK's
+  shape (e.g. that its `type_name` is a driver-internal enum and the SQL-facing type
+  string is `type_text`, or that tags never appear on `TablesAPI.get`'s response at
+  all -- verified against the live workspace, see `RealUCClient` below).
+- Writes execute real SQL DDL (`COMMENT ON TABLE/COLUMN`, `ALTER TABLE ... SET
+  TBLPROPERTIES`, `ALTER TABLE ... SET TAGS`) rather than a metadata-only REST PATCH,
+  and every write method returns the exact SQL string it ran, so callers and tests
+  can assert on it (the build-verdict table's own requirement for `apply.py`).
+- Every write method is idempotent in effect: `COMMENT ON ... IS '<same value>'` and
+  `SET TBLPROPERTIES (...)`/`SET TAGS (...)` with the same key/value both re-run
+  cleanly with no error and no observable change (verified against the live
+  workspace) -- `apply.py`'s idempotency claim rests on that being true here, not
+  rediscovered there.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Mapping, Optional, Protocol, runtime_checkable
+
+# The Free Edition workspace this prototype targets (spec: F-PLATFORM-001, Rules &
+# Constraints). Documented here once rather than duplicated at every call site;
+# callers needing a different workspace pass their own `profile`/`warehouse_id`.
+DEFAULT_UC_PROFILE = "ucmeta"
+DEFAULT_WAREHOUSE_ID = "66fca89a60cb0837"
+
+
+class UCClientError(Exception):
+    """Base class for errors this seam raises, so callers can catch one type rather
+    than reaching into `databricks-sdk`'s exception hierarchy."""
+
+
+class UCTableNotFoundError(UCClientError):
+    """No table exists in Unity Catalog at the given three-part name."""
+
+
+class UCWriteError(UCClientError):
+    """A write (comment/property/tag) did not reach a successful terminal state."""
+
+
+class UCReadError(UCClientError):
+    """A read (e.g. a tags lookup) did not reach a successful terminal state."""
+
+
+@dataclass(frozen=True)
+class UCColumn:
+    """One column's harvested facts, as Unity Catalog reports them.
+
+    `data_type` is the SQL type text Unity Catalog itself renders (e.g.
+    `"decimal(10,2)"`), not a driver-internal type enum -- that is what a human
+    reading a harvested contract skeleton expects to see, and what `harvest.py` will
+    write straight into `models.Column.data_type`.
+    """
+
+    name: str
+    data_type: str
+    nullable: bool
+    position: int
+    partition_key: bool
+    comment: Optional[str] = None
+    tags: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class UCTable:
+    """One table's harvested facts: identity, columns, comment, properties, tags."""
+
+    full_name: str
+    comment: Optional[str]
+    columns: List[UCColumn] = field(default_factory=list)
+    properties: Dict[str, str] = field(default_factory=dict)
+    tags: Dict[str, str] = field(default_factory=dict)
+
+
+@runtime_checkable
+class UCClient(Protocol):
+    """The narrow interface `harvest.py`/`apply.py` depend on instead of a specific
+    Unity Catalog transport.
+
+    Precondition on every method: `full_name` is a non-empty `catalog.schema.table`
+    three-part name (this is what `models.Qualifier.full_name` already produces).
+    Postcondition on every `get_*`: raises `UCTableNotFoundError` if no such table
+    exists, never returns a partial/`None` result silently. Postcondition on every
+    `set_*`: either the write lands and the exact SQL string executed is returned, or
+    a `UCWriteError` is raised -- never a partial write.
+    """
+
+    def get_table(self, full_name: str) -> UCTable:
+        """Return the table's columns, comment, properties and tags."""
+        ...
+
+    def set_table_comment(self, full_name: str, comment: str) -> str:
+        """Set the table-level comment/description. Returns the SQL executed."""
+        ...
+
+    def set_column_comment(self, full_name: str, column_name: str, comment: str) -> str:
+        """Set one column's comment/description. Returns the SQL executed."""
+        ...
+
+    def set_table_properties(self, full_name: str, properties: Mapping[str, str]) -> str:
+        """Merge `properties` into the table's TBLPROPERTIES (existing keys not
+        named in `properties` are left untouched). Returns the SQL executed.
+        Precondition: `properties` is non-empty.
+        """
+        ...
+
+    def set_table_tags(self, full_name: str, tags: Mapping[str, str]) -> str:
+        """Merge `tags` into the table's tags. Returns the SQL executed.
+        Precondition: `tags` is non-empty.
+        """
+        ...
+
+    def set_column_tags(self, full_name: str, column_name: str, tags: Mapping[str, str]) -> str:
+        """Merge `tags` into one column's tags. Returns the SQL executed.
+        Precondition: `tags` is non-empty.
+        """
+        ...
+
+
+# ---- SQL-building helpers shared by both implementations (identical quoting rules
+# so the SQL strings FakeUCClient hands back for assertions look like RealUCClient's) --
+
+
+def require_three_part_name(full_name: str) -> None:
+    """Precondition check shared by both implementations. Raises `ValueError` if
+    `full_name` is not a non-empty `catalog.schema.table` name."""
+    parts = full_name.split(".")
+    if len(parts) != 3 or not all(parts):
+        raise ValueError(f"expected a catalog.schema.table three-part name, got {full_name!r}")
+
+
+def quote_ident(identifier: str) -> str:
+    """Backtick-quote one SQL identifier, escaping any embedded backtick."""
+    return f"`{identifier.replace('`', '``')}`"
+
+
+def quote_full_name(full_name: str) -> str:
+    """Backtick-quote each part of a `catalog.schema.table` name."""
+    return ".".join(quote_ident(part) for part in full_name.split("."))
+
+
+def quote_literal(value: str) -> str:
+    """Single-quote a SQL string literal, escaping any embedded single quote."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def kv_clause(mapping: Mapping[str, str]) -> str:
+    """Render a `{key: value}` mapping as the `'key' = 'value', ...` clause
+    `SET TBLPROPERTIES (...)` and `SET TAGS (...)` both expect."""
+    return ", ".join(f"{quote_literal(k)} = {quote_literal(v)}" for k, v in mapping.items())
+
+
+# Polling budget for a write/read whose warehouse is still cold-starting. A serverless
+# 2X-Small warehouse can take longer than a single `wait_timeout` to spin up on a cold
+# first query; a bounded poll loop below covers that without either failing spuriously
+# or hanging forever if the warehouse is genuinely stuck.
+_STATEMENT_WAIT_TIMEOUT = "30s"
+_STATEMENT_POLL_INTERVAL_SECONDS = 2
+_STATEMENT_MAX_WAIT_SECONDS = 120
+
+
+class RealUCClient:
+    """Thin translation layer over `databricks-sdk`'s `WorkspaceClient`, implementing
+    `UCClient` against the real Free Edition workspace.
+
+    Reads go through `WorkspaceClient().tables.get(full_name=...)` (`TablesAPI.get`,
+    verified against the live workspace on 2026-09-17) for columns/comment/properties,
+    plus two `information_schema.table_tags` / `information_schema.column_tags`
+    queries for tags -- `TablesAPI.get`'s response has no tags field at all, which is
+    not documented anywhere obvious and was only found by calling the live API (see
+    this phase's report for the full list of such surprises).
+
+    Writes go through `WorkspaceClient().statement_execution.execute_statement(...)`
+    against `warehouse_id` and emit real DDL (`COMMENT ON TABLE/COLUMN`, `ALTER TABLE
+    ... SET TBLPROPERTIES`, `ALTER TABLE ... SET TAGS`) rather than a metadata-only
+    REST PATCH: a full-replace PATCH would be dangerous here, because
+    `tables.get(...).properties` is dominated by Delta/statistics-internal keys
+    (`spark.sql.statistics.*`, `delta.*`) that Unity Catalog itself manages, and a
+    naive "set properties to exactly this dict" call would silently drop them.
+    `SET TBLPROPERTIES`/`SET TAGS` merge into the existing map instead, which is also
+    what makes re-running the same write idempotent in effect.
+
+    Auth: `WorkspaceClient(profile=profile)` resolves host and a short-lived OAuth
+    token from `~/.databrickscfg` / the OS keychain. No token or host is hard-coded
+    beyond the documented `DEFAULT_UC_PROFILE`/`DEFAULT_WAREHOUSE_ID` module
+    constants, and no PAT is used anywhere.
+    """
+
+    def __init__(
+        self,
+        profile: str = DEFAULT_UC_PROFILE,
+        warehouse_id: str = DEFAULT_WAREHOUSE_ID,
+    ) -> None:
+        # Imported lazily so importing this module (e.g. from fake-only unit tests)
+        # never requires `databricks-sdk` to be installed or a network to exist.
+        from databricks.sdk import WorkspaceClient
+
+        self._workspace = WorkspaceClient(profile=profile)
+        self._warehouse_id = warehouse_id
+
+    # ---- reads -----------------------------------------------------------------
+
+    def get_table(self, full_name: str) -> UCTable:
+        require_three_part_name(full_name)
+        from databricks.sdk.errors import NotFound
+
+        try:
+            table = self._workspace.tables.get(full_name=full_name)
+        except NotFound as exc:
+            raise UCTableNotFoundError(f"no table found at {full_name!r}") from exc
+
+        table_tags = self._read_table_tags(full_name)
+        column_tags = self._read_column_tags(full_name)
+        columns = [
+            UCColumn(
+                name=column.name,
+                data_type=column.type_text,
+                nullable=bool(column.nullable),
+                position=column.position if column.position is not None else index,
+                partition_key=column.partition_index is not None,
+                comment=column.comment,
+                tags=column_tags.get(column.name, {}),
+            )
+            for index, column in enumerate(table.columns or [])
+        ]
+        return UCTable(
+            full_name=table.full_name or full_name,
+            comment=table.comment,
+            columns=columns,
+            properties=dict(table.properties or {}),
+            tags=table_tags,
+        )
+
+    def _read_table_tags(self, full_name: str) -> Dict[str, str]:
+        catalog, schema, table = full_name.split(".")
+        sql = (
+            f"SELECT tag_name, tag_value FROM {quote_ident(catalog)}.information_schema.table_tags "
+            f"WHERE catalog_name = {quote_literal(catalog)} AND schema_name = {quote_literal(schema)} "
+            f"AND table_name = {quote_literal(table)}"
+        )
+        rows = self._run_query(sql)
+        return {tag_name: tag_value for tag_name, tag_value in rows}
+
+    def _read_column_tags(self, full_name: str) -> Dict[str, Dict[str, str]]:
+        catalog, schema, table = full_name.split(".")
+        sql = (
+            f"SELECT column_name, tag_name, tag_value FROM "
+            f"{quote_ident(catalog)}.information_schema.column_tags "
+            f"WHERE catalog_name = {quote_literal(catalog)} AND schema_name = {quote_literal(schema)} "
+            f"AND table_name = {quote_literal(table)}"
+        )
+        rows = self._run_query(sql)
+        result: Dict[str, Dict[str, str]] = {}
+        for column_name, tag_name, tag_value in rows:
+            result.setdefault(column_name, {})[tag_name] = tag_value
+        return result
+
+    # ---- writes ------------------------------------------------------------------
+
+    def set_table_comment(self, full_name: str, comment: str) -> str:
+        require_three_part_name(full_name)
+        sql = f"COMMENT ON TABLE {quote_full_name(full_name)} IS {quote_literal(comment)}"
+        self._run_statement(sql)
+        return sql
+
+    def set_column_comment(self, full_name: str, column_name: str, comment: str) -> str:
+        require_three_part_name(full_name)
+        sql = (
+            f"COMMENT ON COLUMN {quote_full_name(full_name)}.{quote_ident(column_name)} "
+            f"IS {quote_literal(comment)}"
+        )
+        self._run_statement(sql)
+        return sql
+
+    def set_table_properties(self, full_name: str, properties: Mapping[str, str]) -> str:
+        require_three_part_name(full_name)
+        if not properties:
+            raise ValueError("properties must not be empty")
+        sql = f"ALTER TABLE {quote_full_name(full_name)} SET TBLPROPERTIES ({kv_clause(properties)})"
+        self._run_statement(sql)
+        return sql
+
+    def set_table_tags(self, full_name: str, tags: Mapping[str, str]) -> str:
+        require_three_part_name(full_name)
+        if not tags:
+            raise ValueError("tags must not be empty")
+        sql = f"ALTER TABLE {quote_full_name(full_name)} SET TAGS ({kv_clause(tags)})"
+        self._run_statement(sql)
+        return sql
+
+    def set_column_tags(self, full_name: str, column_name: str, tags: Mapping[str, str]) -> str:
+        require_three_part_name(full_name)
+        if not tags:
+            raise ValueError("tags must not be empty")
+        sql = (
+            f"ALTER TABLE {quote_full_name(full_name)} ALTER COLUMN {quote_ident(column_name)} "
+            f"SET TAGS ({kv_clause(tags)})"
+        )
+        self._run_statement(sql)
+        return sql
+
+    # ---- statement execution plumbing --------------------------------------------
+
+    def _run_statement(self, sql: str) -> None:
+        """Execute DDL that returns no rows. Raises `UCWriteError` on failure."""
+        response = self._execute_and_await(sql)
+        if response.status.state.value != "SUCCEEDED":
+            raise UCWriteError(
+                f"{sql!r} did not succeed (state={response.status.state}): {response.status.error}"
+            )
+
+    def _run_query(self, sql: str) -> List[tuple]:
+        """Execute a `SELECT` and return its rows. Raises `UCReadError` on failure."""
+        response = self._execute_and_await(sql)
+        if response.status.state.value != "SUCCEEDED":
+            raise UCReadError(
+                f"{sql!r} did not succeed (state={response.status.state}): {response.status.error}"
+            )
+        if response.result is None or response.result.data_array is None:
+            return []
+        return response.result.data_array
+
+    def _execute_and_await(self, sql: str):
+        """Run `sql` on the configured warehouse and poll until it reaches a
+        terminal state, covering a warehouse that is still cold-starting."""
+        import time
+
+        from databricks.sdk.service.sql import StatementState
+
+        response = self._workspace.statement_execution.execute_statement(
+            statement=sql,
+            warehouse_id=self._warehouse_id,
+            wait_timeout=_STATEMENT_WAIT_TIMEOUT,
+        )
+        elapsed = 0
+        while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
+            if elapsed >= _STATEMENT_MAX_WAIT_SECONDS:
+                raise UCWriteError(
+                    f"statement {response.statement_id!r} ({sql!r}) did not reach a "
+                    f"terminal state within {_STATEMENT_MAX_WAIT_SECONDS}s"
+                )
+            time.sleep(_STATEMENT_POLL_INTERVAL_SECONDS)
+            elapsed += _STATEMENT_POLL_INTERVAL_SECONDS
+            response = self._workspace.statement_execution.get_statement(response.statement_id)
+        return response
