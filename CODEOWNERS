@@ -1,0 +1,42 @@
+# Review ownership for this repository, referenced by ADR-003, ADR-005 and
+# ADR-006: content edits to a contract need only its own area's owners; schema
+# and tooling changes route to the platform team.
+#
+# GitHub reads CODEOWNERS from the repo root (or .github/, both are valid;
+# root is used here to match this repo's flat top level). Last matching
+# pattern wins, so more specific paths are listed after broader ones.
+#
+# Usernames below are placeholders matching owner_registry.py's fake
+# business-application registry (Owner.solution_owner), not real GitHub
+# accounts -- see owner_registry.py's own docstring for what a production
+# mapping would resolve against instead (an Entra ID / identity-provider
+# group per business-application id, not a hand-maintained file like this
+# one). What this file does NOT express: the second, distinct approver
+# Rules & Constraints requires for sensitivity/PII changes -- CODEOWNERS
+# alone can name required reviewers per path, but a genuine "two different
+# humans must approve" gate needs a branch-protection rule
+# (Require approval of the most recent reviewable push) layered on top,
+# which is a repo-settings concern, not something a file in this repo can
+# configure declaratively.
+
+# Default: unmatched paths fall to the platform team.
+*                                       @data-platform-team
+
+# Content edits -- fast path (ADR-006): each dataset's own owning team.
+/contracts/analytics/customers.yaml    @priya-natarajan
+/contracts/analytics/orders.yaml       @grace-okafor
+/contracts/marketing/campaigns.yaml    @marco-silva
+
+# Schema and tooling -- slow path (ADR-006): the platform team owns the
+# contract shape, the CLI, CI, and everything the design depends on, per
+# "platform owns zero content" (spec Users & Roles).
+/contracts/_schema/                    @data-platform-team
+/contracts/_template.yaml              @data-platform-team
+/change_classes.yaml                   @data-platform-team
+/dq_registry.yaml                      @data-platform-team
+/glossary/                             @data-platform-team
+/src/                                  @data-platform-team
+/cli/                                  @data-platform-team
+/dashboard/                            @data-platform-team
+/.github/                              @data-platform-team
+/docs/                                 @data-platform-team
