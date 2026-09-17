@@ -1,52 +1,320 @@
 # UC Metadata Platform
 
-A prototype for improving metadata quality and coverage on a Databricks + Unity Catalog platform, where data teams own their datasets and a platform team provides shared guardrails.
+A working prototype for improving metadata quality and coverage on a Databricks + Unity Catalog
+platform, where data teams own their datasets and a platform team provides shared guardrails.
 
-> Status: early scaffold. Design decisions (what's mocked vs. built) are being finalized — see `docs/` for ADRs as they land.
+Metadata is a versioned, reviewed file. An AI drafter removes the blank-page cost of writing it.
+A human approves every judgment before anything reaches the catalogue. Coverage is published so
+the gap is visible rather than assumed.
+
+Design decisions live in [`docs/`](docs/) as ADRs:
+
+| ADR | Decision |
+|---|---|
+| [ADR-001](docs/ADR-001-contracts-not-catalog-editing.md) | Contracts in version control, not catalogue editing |
+| [ADR-002](docs/ADR-002-ai-proposes-humans-approve.md) | AI proposes, humans approve |
+| [ADR-003](docs/ADR-003-files-and-change-requests-not-a-ui.md) | Files and change requests, not a user interface |
+| [ADR-004](docs/ADR-004-real-free-tier-workspace-behind-a-client-shaped-interface.md) | A real free-tier Unity Catalog workspace, behind a client-shaped interface |
+| [ADR-005](docs/ADR-005-central-contract-repository.md) | One central contract repository, split later if volume proves it |
+| [ADR-006](docs/ADR-006-two-tracks-for-change.md) | Two tracks for change: content edits vs. schema/tooling changes |
+| [ADR-007](docs/ADR-007-gate-provisioning-and-grants.md) | Gate provisioning and grants, not schema changes (the forcing function) |
 
 ## Problem
 
-TODO — fill in once the diagnosis is finalized.
+On a Unity Catalog platform where data teams own their own data products, most datasets end up
+with almost no useful metadata. The cause is not laziness and not missing tooling: describing a
+dataset is **decoupled from every workflow a producer is already obliged to complete.** You can
+publish a table, cut a release and get access granted without describing a single column. So
+"go tag your tables" campaigns spend goodwill and leave nothing durable behind — and the bill is
+paid downstream, by consumers who cannot find datasets, cannot tell two similar tables apart,
+re-ingest a source that already exists, and cannot judge whether data is trustworthy or sensitive.
+
+This prototype attacks the cause rather than the symptom, in three moves:
+
+1. **Put the metadata on the path the producer already walks.** A new dataset is not provisioned
+   without a valid contract, and no consumer read grant is issued for a dataset that has none.
+   Both are steps the platform genuinely owns, so authoring metadata stops being an extra errand
+   and becomes part of getting the thing the producer came for (ADR-007).
+2. **Remove the blank-page cost.** An AI drafter proposes a description, a business-term link and
+   a sensitivity classification for every column. It proposes; it never publishes (ADR-002).
+3. **Make the gap visible.** Coverage is computed and published per team, next to an outcome
+   measure, so "coverage went up" can be checked against "anything got better".
+
+Where the platform does *not* own a choke point, it does not pretend to. A schema change inside a
+producer's own pipeline repository is **detected as drift, never blocked** — see ADR-007 for why
+detect-only is the honest position there.
 
 ## Approach
 
-TODO — one-paragraph framing + architecture diagram.
+One human-readable contract file per dataset is the only authoring surface. Facts the catalogue
+already knows are harvested into it and never hand-typed; judgments are drafted by the AI, cleared
+by a named human, reviewed in a change request, and applied to the live catalogue only on merge.
+Two gates make that loop start at all (provisioning, grants) and two more make it safe (the
+unreviewed-marker refusal, and apply-on-merge-only). Everything is files, a five-verb CLI, and CI.
+
+```
+                       ┌──────────────────────────────────────────────┐
+                       │       Unity Catalog (live workspace)         │
+                       └──────────────────────────────────────────────┘
+                            │ facts (columns, types, partitioning)   ▲
+                            │                                        │ writes: comments,
+                            ▼                                        │ tags, properties
+        ┌───────────┐   ┌───────────┐   ┌────────────┐   ┌───────────┴───┐
+        │  harvest  │──▶│  propose  │──▶│  validate  │──▶│     apply     │
+        │ skeleton  │   │ AI drafts │   │  the gate  │   │ on merge only │
+        └───────────┘   └───────────┘   └────────────┘   └───────────────┘
+              │               │                │                 │
+              ▼               ▼                │                 ▼
+        contracts/*.yaml  ai_proposed:true     │          release_log.jsonl
+        (the one          markers on every     │          (append-only:
+         authoring         drafted field       │           what, who, when,
+         surface)                              │           outcome)
+                                               ▼
+                                   ┌──────────────────────────┐
+                                   │ coverage  ──▶ dashboard  │
+                                   │ fill rate per team +     │
+                                   │ one outcome measure      │
+                                   └──────────────────────────┘
+
+  FORCING FUNCTIONS (why the loop starts)      GATES (why it is safe)
+  · no contract  → no dataset provisioned      · any ai_proposed marker left → apply refuses,
+  · no contract  → no consumer read grant        whole contract, no partial writes
+    (both call validate()'s verdict)           · change requests may validate and dry-run,
+  · grandfathered estate: drift + coverage,      never apply; apply is wired to merge on main
+    never a retroactive block                  · every change request prints every planned write
+                                               · content edits take the fast path, schema/tooling
+                                                 changes the slow one — routed by file path,
+                                                 never argued per change request (ADR-006)
+```
 
 ## Quickstart
 
-TODO — once the CLI exists.
+No Databricks account and no API key are needed: every verb defaults to the in-repo fake
+catalogue (`FakeUCClient`), whose three fixture tables mirror the live workspace's schemas
+exactly. `propose` is the one exception — it makes a real AI call — and it is clearly marked below.
+
+```bash
+git clone https://github.com/<owner>/uc-metadata-platform.git
+cd uc-metadata-platform
+
+# Set up the environment — pick ONE of the two options below.
+
+# Option A — uv (this is exactly what CI runs)
+uv sync --extra dev
+source .venv/bin/activate
+
+# Option B — pip
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+# The test suite: offline, no credentials, no network.
+pytest -m "not uc_live and not llm_live"
+```
+
+With the environment active, `ucmeta` is on your PATH. Every command below also works as
+`./cli/ucmeta <verb> ...` (a no-install wrapper around the same `main()`), or as
+`uv run ucmeta <verb> ...` without activating anything.
+
+```bash
+# 1. HARVEST — read a table's facts out of the catalogue into a skeleton contract.
+#    Judgment fields are left blank on purpose; placeholders are unmistakable.
+ucmeta harvest workspace.analytics.orders --ba-id BA-30587 -o /tmp/orders-skeleton.yaml
+
+# 2. PROPOSE — the AI drafter fills the blanks, marking every value ai_proposed: true.
+#    The only step that needs a key (ANTHROPIC_API_KEY) and the only one that costs money;
+#    it prints its model, token counts, dollar cost and latency.
+ucmeta propose /tmp/orders-skeleton.yaml -o /tmp/orders-proposed.yaml
+#    ...or edit a contract in place:  ucmeta propose <contract> --in-place
+
+# 3. VALIDATE — the automated checks, plus every catalogue write a merge would perform.
+#    Exit code 0 on pass, 1 on failure: this is the CI gate, and the verdict the
+#    provisioning/grant gates would call.
+ucmeta validate contracts/analytics/customers.yaml   # PASS  (reviewed and complete)
+ucmeta validate contracts/analytics/orders.yaml      # FAIL  (grandfathered, pre-review)
+
+# 4. APPLY — write the contract to the catalogue. Refuses the whole contract if it does
+#    not validate; --dry-run prints the plan and writes nothing.
+ucmeta apply contracts/analytics/customers.yaml --approved-by "your name" --dry-run
+ucmeta apply contracts/analytics/customers.yaml --approved-by "your name" \
+  --log-path /tmp/release_log.jsonl
+#    (drop --log-path to append to the repository's own release_log.jsonl)
+#    Re-run it: apply is idempotent in effect — the same statements are issued and
+#    nothing observable changes (COMMENT ON / SET TAGS / SET TBLPROPERTIES all re-run
+#    cleanly). Verified against the live workspace, not just the fake, which starts
+#    from a clean in-memory catalogue in every new process.
+
+# 5. COVERAGE — fill rate per dimension and per team, plus one (clearly labelled
+#    simulated) outcome measure. Then render it as a static page.
+ucmeta coverage contracts/ -o /tmp/coverage_report.json
+python dashboard/app.py /tmp/coverage_report.json -o /tmp/coverage.html
+```
+
+**Running against a real workspace.** Every verb takes `--live` (and `--profile`, default
+`ucmeta`), which swaps the fake for `RealUCClient` against a real Unity Catalog workspace over
+`databricks-sdk`. It expects an already-authenticated Databricks CLI profile
+(`databricks auth login` — OAuth user-to-machine, never a personal access token); the repository
+holds a profile name and a host, never a secret. Set-up of that workspace is out of scope for this
+README — see ADR-004 and `scripts/seed_demo_data.sql`.
+
+Also worth opening, because they are the artifacts rather than the prose:
+`contracts/analytics/customers.yaml` (the happy path), `contracts/marketing/campaigns.yaml`
+(well-covered but quality-red), `contracts/analytics/orders.yaml` (grandfathered, still failing
+validation), `change_classes.yaml` (the two-track declaration) and `release_log.jsonl`.
 
 ## What's mocked
 
-TODO — filled in as each component's mock-vs-build call is made. See project ADRs in `docs/`.
+The rule this build followed: *mock the systems you cannot touch; build the primitives the design
+depends on; never mock the thing being evaluated — and when a system turns out to be reachable for
+free, touch it rather than imitating it.*
 
-One call already made and worth stating here rather than only in a workflow
-comment: the three CI workflows under `.github/workflows/` (`validate.yml`,
-`apply.yml`, `coverage.yml`) always run `ucmeta` against `FakeUCClient`, never
-with `--live`. This is a public repo demonstrating a real interview
-submission, so a personal Databricks Free Edition credential has no business
-being a public-repo GitHub Actions secret — CI proves the gate *mechanism*
-(routing, exit codes, apply-on-merge) is real and reproducible for anyone who
-forks this repo; the live, `--live`-flagged loop against the real workspace
-is a local, human-run demonstration.
+| Component | Status | Notes |
+|---|---|---|
+| Contract model + JSON Schema (`models.py`, `contracts/_schema/`) | **Real** | The primitive everything else rests on, with a backwards-compatibility test. |
+| `uc_client.py` (`UCClient` protocol + `RealUCClient`) | **Real, against a real workspace** | Thin `databricks-sdk` translation: it translates, it does not decide (ADR-004). |
+| `fake_uc.py` | **Fake, test-only** | Not the product's target. Exists so tests are offline and deterministic, and so the seam has two implementations; a shared contract-test suite runs against both. |
+| `harvest.py` | **Real logic, real source** | Ran for real against the live workspace; the three shipped contracts were harvested from it. |
+| `propose.py` | **Real (real model, real calls)** | `claude-haiku-4-5`, structured output, masked samples, glossary-grounded term links. Recorded fixtures in CI. See the open gap below. |
+| `validate.py` | **Real** | Drift, unreviewed markers, placeholder sentinels. Certification-vs-evidence is deliberately *not* wired in yet — see gaps. |
+| `apply.py` | **Real, real target** | Table comment, column comments, tags, properties. Idempotency and revert-restores proven against live Unity Catalog. |
+| `release_log.py` | **Mock writer, real interface, really wired** | Every apply appends a record. The writer is a local `release_log.jsonl`; the production adapter swaps the writer, not the record's shape. |
+| `coverage.py` + `dashboard/app.py` | **Real, minimal** | Fill rate per dimension and team, computed not described. Rendered as a static generated page — no served app to fail live. |
+| Outcome measure | **Simulated, labelled** | Computed from `sample_outcome_events.yaml`; every measure carries `simulated=True` and a caveat naming the fixture, so no caller can present it as observed. |
+| `owner_registry.py` | **Mock behind a seam** | `resolve_owner(ba_id) -> Owner` over four hard-coded entries. Contracts store only the business-application id pointer, never a copied owner string. |
+| `glossary/terms.yaml` + `glossary.py` | **Mock data, real grounding** | Twelve sample terms, loaded and passed to the drafter as context; a proposed term link is dropped unless it resolves to a real entry. At this size the whole glossary fits in the prompt, so there is no retrieval ranking to speak of — that would be the next step at real glossary scale. |
+| `dq_registry.yaml` + `dq_registry.py` | **Mock registry, real evaluation** | Six rules with a small predicate grammar, evaluated in Python over sampled rows — one rule language for both clients. No rule-execution engine. |
+| `change_classes.yaml` + `change_routing.py` | **Real, enforced** | The two-track split is a glob match over the change request's diff, not a paragraph in this README. |
+| CI workflows (`validate`, `apply`, `coverage`) | **Real, fake-backed** | See below. |
+| Provisioning / grant gates | **Described, on a real check** | The gates belong to the target organisation's platform. What is built is the machine-readable verdict they would call. |
+| Personal-data detection | **Mock, light** | AI proposal plus conservative name/value-shape masking. No compliance-grade classifier. |
 
-**AI-proposed content has not been generated yet in this repo.** `propose.py` is
-built, tested (see `tests/unit/test_propose.py`), and proven against
-hand-authored fixture responses, but every contract shipped under `contracts/`
-was written directly by a human, not drafted by the AI — this build session ran
-with no `ANTHROPIC_API_KEY` available, and fabricating what a model "would have
-said" into an `ai_proposed: true` field would be worse than leaving the field
-human-authored. Before presenting this walkthrough, run `ucmeta propose
-contracts/analytics/orders.yaml --in-place` (or against a chosen contract) with a
-real `ANTHROPIC_API_KEY` to get a genuine AI-drafted proposal — `orders.state` is
-deliberately ambiguous (order status vs. US state abbreviation) and is the best
-candidate for demonstrating the drafter's low-confidence-flagging behaviour live.
-This is a real, unclosed loop, not a completed part of the build.
+One call worth stating here rather than only in a workflow comment: the three CI workflows under
+`.github/workflows/` (`validate.yml`, `apply.yml`, `coverage.yml`) always run `ucmeta` against
+`FakeUCClient`, never with `--live`. This is a public repo demonstrating a real interview
+submission, so a personal Databricks Free Edition credential has no business being a public-repo
+GitHub Actions secret — CI proves the gate *mechanism* (routing, exit codes, apply-on-merge) is
+real and reproducible for anyone who forks this repo; the live, `--live`-flagged loop against the
+real workspace is a local, human-run demonstration.
+
+**AI-proposed content has not been generated yet in this repo.** `propose.py` is built, tested
+(see `tests/unit/test_propose.py`), and proven against hand-authored fixture responses, but every
+contract shipped under `contracts/` was written directly by a human, not drafted by the AI — this
+build session ran with no `ANTHROPIC_API_KEY` available, and fabricating what a model "would have
+said" into an `ai_proposed: true` field would be worse than leaving the field human-authored.
+Before presenting this walkthrough, run `ucmeta propose contracts/analytics/orders.yaml
+--in-place` (or against a chosen contract) with a real `ANTHROPIC_API_KEY` to get a genuine
+AI-drafted proposal — `orders.state` is deliberately ambiguous (order status vs. US state
+abbreviation) and is the best candidate for demonstrating the drafter's low-confidence-flagging
+behaviour live. This is a real, unclosed loop, not a completed part of the build.
+
+Three further gaps in what was built, named here rather than discovered by a reader:
+
+- **The certification-vs-evidence check is not wired into `validate()`.** Both pieces it needs
+  exist and are tested (`dq_registry.evaluate_rules`, `coverage.tier_is_supported_by_evidence`),
+  and the call shape is documented at the integration point — but the check itself is not in the
+  gate. That is why `campaigns.yaml`'s `silver` claim is accepted today even though its quality
+  evidence does not support it.
+- **`tests/e2e/demo_scenario.py` was not built.** SC-001-01 is covered by unit tests against the
+  fake plus live runs done by hand; the planned single scenario file that runs both modes from one
+  source is not in the repository.
+- **No `CODEOWNERS` file ships.** Per-area code ownership is the design's answer to "who may
+  approve what" (including the second approver for sensitivity), and the `contracts/<area>/`
+  layout is what it would key on — but the file is a named placeholder, not a shipped artifact,
+  so that rule is carried by review convention here, not enforced.
 
 ## Trade-offs
 
-TODO.
+Every one of these is a decision with a cost, and the cost is stated rather than implied.
+
+- **GitOps YAML, not a UI** (ADR-003). *Why:* review, approval, history, diff, revert and
+  ownership come free from a tool producers already use, and the gate lands where they already
+  work. *Cost:* non-engineer authors — stewards, business owners — are shut out, and YAML
+  indentation errors are a real class of mistake a form would have prevented. A form that writes
+  the same YAML is the deliberate follow-on; the file staying the substrate is what keeps that
+  move cheap.
+- **The AI proposes, it never publishes** (ADR-002). *Why:* the blank page is the actual barrier,
+  but descriptions become the organisation's vocabulary and sensitivity labels drive access — on a
+  single global production metastore with no staging tier. *Cost:* a human must clear every marker,
+  so the drafter accelerates the work without removing it, and the residual risk moves from model
+  error to reviewer fatigue. Rubber-stamping forty markers produces exactly the outcome the rule
+  exists to prevent, and nothing here measures review quality.
+- **One central contract repository** (ADR-005). *Why:* discoverable contracts, one validation
+  pipeline, one place to ship a schema migration — and it is the reversible direction, since
+  splitting a folder is mechanical while consolidating N drifted repositories is a project.
+  *Cost:* review contention in a shared folder, and producer autonomy that is currently unpaid for.
+  The flip trigger is named in advance: sustained change-request queueing in `contracts/`.
+- **Two tracks for change, routed by file path** (ADR-006). *Why:* blast radius is asymmetric — a
+  content edit affects one dataset, a schema change affects every team's contracts — and a class
+  argued per change request is a queue, which is what killed the tagging campaigns. *Cost:* the
+  path-pattern declaration has to be maintained; a new platform-owned file under `contracts/` that
+  nobody adds to `content_exclude` silently gets the fast path.
+- **Gate provisioning and grants, not schema changes** (ADR-007). *Why:* these are the two choke
+  points this platform genuinely owns, so the contract rides along on obligations the producer
+  already has. *Cost:* an honest hole — a producer's own pipeline can change a schema and the
+  platform can only *detect* it (drift, coverage drop, a failing change request), and an existing
+  dataset whose owner never needs a new grant is untouched by the gate. The stronger lever, a CI
+  check inside each producer's repository, needs cross-team adoption and was deferred, not
+  dismissed.
+- **Column-level metadata required for new datasets, grandfathered for existing ones.** *Why:* a
+  retroactive block would break working pipelines and buy nothing; the estate moves by visibility
+  and drift reporting instead. *Cost:* a transitional two-speed state that is genuinely untidy —
+  `contracts/analytics/orders.yaml` ships failing validation to prove it is real rather than
+  claimed — and no bound on how long the grandfathered tail persists.
+- **A real free-tier workspace behind a client-shaped seam** (ADR-004). *Why:* several semantic
+  questions (idempotency of `COMMENT ON`, tags absent from the table read, type rendering) were
+  settled by experiment rather than by a mock's author guessing. *Cost:* two implementations of the
+  seam to keep honest (mitigated by a shared contract-test suite), and zero claim to production
+  fidelity — Free Edition is serverless-only, one workspace, three tables, no staging metastore,
+  no identity groups.
+- **A five-verb CLI over a framework or a service.** *Why:* `argparse`, one entry point, no
+  dependency the project does not otherwise need; the same `main()` behind `./cli/ucmeta`, the
+  `ucmeta` script and CI. *Cost:* no interactive affordances, and `ucmeta` remains a local tool
+  rather than a service anything else can call.
 
 ## What I didn't do
 
-TODO.
+Deliberate omissions. Each is a scope decision, not an oversight — and a few are gaps rather than
+choices, marked as such.
+
+- **Production-metastore fidelity.** Real Unity Catalog integration is in scope and real; the claim
+  that this is the target organisation's environment is not. No scale, no region topology, no
+  staging tier, no real identity groups, no governance policies to comply with. The seam is
+  evidence that moving is contained, not evidence that it has been done.
+- **Freshness observation.** Refresh cadence and SLAs are *declared* in the contract, never
+  measured. No table-history introspection, no metrics harvester. Some declared commitments will
+  therefore be untrue — an accepted, named gap.
+- **Bulk migration tooling for the existing estate.** No mass-backfill runner, no prioritisation
+  engine. The migration argument is made in words, not in code.
+- **RBAC beyond a code-owners placeholder.** Who may edit and approve which contract is expressed
+  as per-area code ownership. Production would map that to identity groups; that mapping is not
+  built, and (see "What's mocked") the `CODEOWNERS` file itself is not shipped either.
+- **A discovery or search experience.** Nothing at all, not even a stub page. Discovery is the
+  downstream consumer of good metadata, not this feature; a half-built discovery surface would cost
+  walkthrough time and invite questions about a layer this prototype is not arguing about.
+- **A prompt-injection test against the drafter.** A hostile column comment or sample value trying
+  to steer the proposal is cheap to test and genuinely worth testing. It was deprioritised against
+  the core loop, not judged unimportant. The structural defence that *is* present is that the
+  drafter cannot publish: a successful injection yields a bad suggestion, not a bad catalogue entry.
+  Claiming that makes injection harmless would be overstating it.
+- **The producer-repo CI hard-block on uncontracted schema changes.** Deferred, not rejected — it
+  is the strongest lever available in principle and it needs every producing team to adopt a check
+  in a repository this platform does not own. That is a cross-team negotiation, not a build task.
+  Drift detection is the standing answer meanwhile (ADR-007).
+- **A real data-quality engine.** Rules come from a small stand-in registry with a deliberately
+  tiny predicate grammar, evaluated over sampled rows. No rule scheduler, no scoring engine.
+  Related gap: the certification-vs-evidence check is ready to wire and not wired.
+- **Business glossary curation.** The glossary is assumed to exist elsewhere and is represented by
+  a dozen realistic sample terms used as drafter context.
+- **A real central release-log service.** Apply publishes through a real interface; the writer
+  behind it is a local append-only file. No retention policy, no tamper-evident storage, no
+  cross-team query surface.
+- **The platform team's own release process.** The slow path is named and the routing that selects
+  it is enforced; the release review, version tagging, migration runner and deprecation windows are
+  described, not built.
+- **Observability of the tooling itself, lineage capture, multi-region apply paths, and consumer
+  feedback routing.** All designed or named, none implemented.
+
+Two process notes, for the same reason everything else here is stated plainly. A stray test
+artifact was committed and had to be cleaned up before push (the shipped-contracts commit is
+amended for that reason), and the repository's default branch was created as `master` and renamed
+to `main` before anything was pushed — both caught locally, and both the sort of thing worth
+naming rather than quietly tidying out of the history.
