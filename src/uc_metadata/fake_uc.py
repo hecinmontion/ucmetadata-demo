@@ -15,7 +15,7 @@ this fake cannot quietly drift away from real Unity Catalog semantics (ADR-004).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Mapping
+from typing import Any, Dict, List, Mapping
 
 from uc_metadata.uc_client import (
     UCColumn,
@@ -50,18 +50,177 @@ class _FakeTable:
     columns: List[_FakeColumn] = field(default_factory=list)
     properties: Dict[str, str] = field(default_factory=dict)
     tags: Dict[str, str] = field(default_factory=dict)
+    rows: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _column(name: str, data_type: str, position: int, nullable: bool = True) -> _FakeColumn:
     return _FakeColumn(name=name, data_type=data_type, nullable=nullable, position=position)
 
 
+def _default_sample_rows() -> Dict[str, List[Dict[str, Any]]]:
+    """Real representative sample rows for each fixture table -- the first five rows
+    `scripts/seed_demo_data.sql` inserts into the live workspace for each table,
+    verified against the live workspace on 2026-09-17 (`customers`) and transcribed
+    from the seed script for `campaigns`/`orders`.
+
+    Values are strings, matching the wire format Unity Catalog's statement execution
+    API actually renders (its default `JSON_ARRAY` result format -- verified live),
+    so `sample_rows` looks the same shape on `FakeUCClient` as on `RealUCClient`. The
+    `orders` rows deliberately keep the mix of order-status words ('shipped',
+    'pending', 'refunded') and US-state abbreviations ('CA', 'NY') that makes `state`
+    the intentionally ambiguous column the AI drafter is meant to flag (spec: Q&A
+    "AI confidently produces a wrong answer" moment; see also `glossary/terms.yaml`'s
+    `order_status` entry).
+    """
+    return {
+        "workspace.analytics.customers": [
+            {
+                "customer_id": "100001",
+                "email": "amara.diallo@example.com",
+                "first_name": "Amara",
+                "last_name": "Diallo",
+                "region": "EMEA",
+                "signup_date": "2023-02-14",
+                "lifetime_value": "1240.50",
+            },
+            {
+                "customer_id": "100002",
+                "email": "jin.park@example.com",
+                "first_name": "Jin",
+                "last_name": "Park",
+                "region": "APAC",
+                "signup_date": "2023-05-03",
+                "lifetime_value": "340.00",
+            },
+            {
+                "customer_id": "100003",
+                "email": "lucas.oliveira@example.com",
+                "first_name": "Lucas",
+                "last_name": "Oliveira",
+                "region": "LATAM",
+                "signup_date": "2022-11-21",
+                "lifetime_value": "5620.75",
+            },
+            {
+                "customer_id": "100004",
+                "email": "freya.johansen@example.com",
+                "first_name": "Freya",
+                "last_name": "Johansen",
+                "region": "EMEA",
+                "signup_date": "2024-01-09",
+                "lifetime_value": "90.25",
+            },
+            {
+                "customer_id": "100005",
+                "email": "wei.chen@example.com",
+                "first_name": "Wei",
+                "last_name": "Chen",
+                "region": "APAC",
+                "signup_date": "2023-08-30",
+                "lifetime_value": "2100.00",
+            },
+        ],
+        "workspace.marketing.campaigns": [
+            {
+                "campaign_id": "5001",
+                "name": "Spring Launch",
+                "channel": "email",
+                "budget": "12000.00",
+                "start_date": "2026-03-01",
+                "end_date": "2026-03-31",
+                "active": "false",
+            },
+            {
+                "campaign_id": "5002",
+                "name": "Summer Push",
+                "channel": "social",
+                "budget": "8000.00",
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-30",
+                "active": "false",
+            },
+            {
+                "campaign_id": "5003",
+                "name": "Back to School",
+                "channel": "search",
+                "budget": "-500.00",
+                "start_date": "2026-08-15",
+                "end_date": "2026-09-01",
+                "active": "false",
+            },
+            {
+                "campaign_id": "5004",
+                "name": "Holiday Blitz",
+                "channel": "email",
+                "budget": "25000.00",
+                "start_date": "2026-11-20",
+                "end_date": "2026-11-10",
+                "active": "false",
+            },
+            {
+                "campaign_id": "5005",
+                "name": "New Year Retention",
+                "channel": "lifecycle",
+                "budget": "4000.00",
+                "start_date": "2027-01-02",
+                "end_date": "2027-01-31",
+                "active": "true",
+            },
+        ],
+        "workspace.analytics.orders": [
+            {
+                "order_id": "900001",
+                "customer_id": "100001",
+                "state": "shipped",
+                "amount": "84.00",
+                "order_ts": "2026-04-02 10:15:00",
+                "channel": "web",
+            },
+            {
+                "order_id": "900002",
+                "customer_id": "100003",
+                "state": "CA",
+                "amount": "210.50",
+                "order_ts": "2026-04-03 09:02:00",
+                "channel": "web",
+            },
+            {
+                "order_id": "900003",
+                "customer_id": "100002",
+                "state": "pending",
+                "amount": "19.99",
+                "order_ts": "2026-04-04 14:22:00",
+                "channel": "mobile",
+            },
+            {
+                "order_id": "900004",
+                "customer_id": "100005",
+                "state": "NY",
+                "amount": "560.00",
+                "order_ts": "2026-04-05 11:47:00",
+                "channel": "web",
+            },
+            {
+                "order_id": "900005",
+                "customer_id": "100007",
+                "state": "refunded",
+                "amount": "120.00",
+                "order_ts": "2026-04-06 08:30:00",
+                "channel": "mobile",
+            },
+        ],
+    }
+
+
 def default_fixture_tables() -> Dict[str, _FakeTable]:
     """The fixture set `FakeUCClient` seeds itself with by default: the same three
     tables `scripts/seed_demo_data.sql` creates in the live workspace, same shapes,
-    no rows. Kept as a free function (rather than inlined in `__init__`) so a test can
-    import and mutate a fresh copy without reaching into a live `FakeUCClient`.
+    plus the first five rows each table is seeded with (`_default_sample_rows`), so
+    `sample_rows` has real representative data to hand back offline. Kept as a free
+    function (rather than inlined in `__init__`) so a test can import and mutate a
+    fresh copy without reaching into a live `FakeUCClient`.
     """
+    sample_rows = _default_sample_rows()
     return {
         "workspace.analytics.customers": _FakeTable(
             comment=None,
@@ -74,6 +233,7 @@ def default_fixture_tables() -> Dict[str, _FakeTable]:
                 _column("signup_date", "date", 5),
                 _column("lifetime_value", "decimal(10,2)", 6),
             ],
+            rows=sample_rows["workspace.analytics.customers"],
         ),
         "workspace.marketing.campaigns": _FakeTable(
             comment=None,
@@ -86,6 +246,7 @@ def default_fixture_tables() -> Dict[str, _FakeTable]:
                 _column("end_date", "date", 5),
                 _column("active", "boolean", 6),
             ],
+            rows=sample_rows["workspace.marketing.campaigns"],
         ),
         "workspace.analytics.orders": _FakeTable(
             comment=None,
@@ -97,6 +258,7 @@ def default_fixture_tables() -> Dict[str, _FakeTable]:
                 _column("order_ts", "timestamp", 4),
                 _column("channel", "string", 5),
             ],
+            rows=sample_rows["workspace.analytics.orders"],
         ),
     }
 
@@ -137,6 +299,13 @@ class FakeUCClient:
             properties=dict(table.properties),
             tags=dict(table.tags),
         )
+
+    def sample_rows(self, full_name: str, limit: int = 5) -> List[Dict[str, Any]]:
+        require_three_part_name(full_name)
+        if limit <= 0:
+            raise ValueError(f"limit must be a positive integer, got {limit!r}")
+        table = self._require_table(full_name)
+        return [dict(row) for row in table.rows[:limit]]
 
     # ---- writes ------------------------------------------------------------------
 

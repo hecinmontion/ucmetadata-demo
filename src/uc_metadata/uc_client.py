@@ -30,7 +30,7 @@ Design decisions worth stating rather than leaving implicit:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Mapping, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Mapping, Optional, Protocol, runtime_checkable
 
 # The Free Edition workspace this prototype targets (spec: F-PLATFORM-001, Rules &
 # Constraints). Documented here once rather than duplicated at every call site;
@@ -101,6 +101,21 @@ class UCClient(Protocol):
 
     def get_table(self, full_name: str) -> UCTable:
         """Return the table's columns, comment, properties and tags."""
+        ...
+
+    def sample_rows(self, full_name: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Return up to `limit` rows as column-name-keyed dicts, for `propose.py`'s
+        AI drafter to read as retrieval context (masked/redacted by the caller for
+        any column that looks sensitive before it ever reaches the drafter).
+
+        Precondition: `limit` is a positive integer. Postcondition: returns at most
+        `limit` rows, each a `{column_name: value}` mapping over every column in the
+        table; an empty table returns an empty list, never `None`. Values come back
+        as the strings Unity Catalog's statement execution API itself renders (its
+        default `JSON_ARRAY` result format), not driver-native Python types -- the
+        same shape on `RealUCClient` and `FakeUCClient`, verified against the live
+        workspace.
+        """
         ...
 
     def set_table_comment(self, full_name: str, comment: str) -> str:
@@ -182,7 +197,11 @@ class RealUCClient:
     plus two `information_schema.table_tags` / `information_schema.column_tags`
     queries for tags -- `TablesAPI.get`'s response has no tags field at all, which is
     not documented anywhere obvious and was only found by calling the live API (see
-    this phase's report for the full list of such surprises).
+    this phase's report for the full list of such surprises). `sample_rows` also goes
+    through statement execution (`SELECT * FROM <table> LIMIT <n>`): the API's default
+    `JSON_ARRAY` result format renders every cell as a string regardless of its SQL
+    type (verified live), which is why `UCClient.sample_rows`'s postcondition
+    documents string values rather than driver-native Python types.
 
     Writes go through `WorkspaceClient().statement_execution.execute_statement(...)`
     against `warehouse_id` and emit real DDL (`COMMENT ON TABLE/COLUMN`, `ALTER TABLE
@@ -269,6 +288,19 @@ class RealUCClient:
             result.setdefault(column_name, {})[tag_name] = tag_value
         return result
 
+    def sample_rows(self, full_name: str, limit: int = 5) -> List[Dict[str, Any]]:
+        require_three_part_name(full_name)
+        if limit <= 0:
+            raise ValueError(f"limit must be a positive integer, got {limit!r}")
+        sql = f"SELECT * FROM {quote_full_name(full_name)} LIMIT {int(limit)}"
+        response = self._run_read_statement(sql)
+        schema = response.manifest.schema if response.manifest is not None else None
+        columns = schema.columns if schema is not None else None
+        if not columns or response.result is None or response.result.data_array is None:
+            return []
+        column_names = [column.name for column in columns]
+        return [dict(zip(column_names, row)) for row in response.result.data_array]
+
     # ---- writes ------------------------------------------------------------------
 
     def set_table_comment(self, full_name: str, comment: str) -> str:
@@ -323,13 +355,20 @@ class RealUCClient:
                 f"{sql!r} did not succeed (state={response.status.state}): {response.status.error}"
             )
 
-    def _run_query(self, sql: str) -> List[tuple]:
-        """Execute a `SELECT` and return its rows. Raises `UCReadError` on failure."""
+    def _run_read_statement(self, sql: str):
+        """Execute a read-only statement and return its raw terminal-state response,
+        columns and all -- shared by `_run_query` (rows only) and `sample_rows`
+        (rows plus column names). Raises `UCReadError` on failure."""
         response = self._execute_and_await(sql)
         if response.status.state.value != "SUCCEEDED":
             raise UCReadError(
                 f"{sql!r} did not succeed (state={response.status.state}): {response.status.error}"
             )
+        return response
+
+    def _run_query(self, sql: str) -> List[tuple]:
+        """Execute a `SELECT` and return its rows. Raises `UCReadError` on failure."""
+        response = self._run_read_statement(sql)
         if response.result is None or response.result.data_array is None:
             return []
         return response.result.data_array

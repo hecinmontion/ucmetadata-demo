@@ -171,6 +171,36 @@ def test_set_column_tags_is_scoped_to_the_named_column(client: UCClient):
     assert "pii_contract_test" not in table.tags
 
 
+def test_sample_rows_returns_up_to_limit_rows_as_column_keyed_dicts(client: UCClient):
+    """`sample_rows` returns at most `limit` rows, each keyed by every column name
+    on the table, with real (non-empty) values -- what `propose.py` will read as
+    retrieval context for the AI drafter."""
+    rows = client.sample_rows(TABLE, limit=3)
+
+    assert 1 <= len(rows) <= 3
+    expected_columns = {
+        "customer_id",
+        "email",
+        "first_name",
+        "last_name",
+        "region",
+        "signup_date",
+        "lifetime_value",
+    }
+    for row in rows:
+        assert set(row.keys()) == expected_columns
+        assert row["email"]  # non-empty: a real sample value, not a blank cell
+
+    # Default limit (5) is at least as generous as an explicit smaller one.
+    assert len(client.sample_rows(TABLE)) >= len(rows)
+
+
+def test_sample_rows_rejects_non_positive_limit(client: UCClient):
+    """Precondition: `limit` must be a positive integer."""
+    with pytest.raises(ValueError):
+        client.sample_rows(TABLE, limit=0)
+
+
 def test_write_methods_reject_empty_property_and_tag_maps(client: UCClient):
     """Precondition: `set_table_properties`/`set_table_tags` refuse an empty
     mapping rather than emitting `SET TBLPROPERTIES ()`, which is not valid DDL."""

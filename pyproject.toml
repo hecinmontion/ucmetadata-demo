@@ -10,6 +10,7 @@ dependencies = [
     "pyyaml>=6",
     "jsonschema>=4",
     "databricks-sdk>=0.30",
+    "anthropic>=1.6.0",
 ]
 
 [project.optional-dependencies]
@@ -33,4 +34,5 @@ testpaths = ["tests"]
 markers = [
     "scenario: binds a test to a scenario ID in specs/F-PLATFORM-001-uc-metadata-contracts.md",
     "uc_live: exercises RealUCClient against the live Free Edition workspace; needs network and the ucmeta OAuth profile, gated by UC_LIVE_TESTS=1",
+    "llm_live: makes a real Anthropic API call and records a fixture; needs ANTHROPIC_API_KEY, gated by LLM_LIVE_TESTS=1",
 ]

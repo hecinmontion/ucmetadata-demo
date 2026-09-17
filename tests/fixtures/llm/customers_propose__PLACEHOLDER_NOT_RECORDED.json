@@ -1,0 +1,18 @@
+{
+  "id": "msg_01PlaceholderCustomers001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5-20251001",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"columns\":[{\"column_name\":\"customer_id\",\"description\":\"Unique surrogate identifier for a customer account, assigned at signup.\",\"business_term\":\"customer\",\"pii\":false,\"sensitivity\":\"internal\",\"note\":null},{\"column_name\":\"email\",\"description\":\"The customer's primary email address, used for account communication and order confirmations.\",\"business_term\":\"email\",\"pii\":true,\"sensitivity\":\"confidential\",\"note\":null},{\"column_name\":\"first_name\",\"description\":\"The customer's given (first) name, as provided at signup.\",\"business_term\":null,\"pii\":true,\"sensitivity\":\"confidential\",\"note\":null},{\"column_name\":\"last_name\",\"description\":\"The customer's family (last) name, as provided at signup.\",\"business_term\":null,\"pii\":true,\"sensitivity\":\"confidential\",\"note\":null},{\"column_name\":\"region\",\"description\":\"The coarse geographic market this customer is associated with (e.g. EMEA, APAC, LATAM), used for regional reporting and routing.\",\"business_term\":\"region\",\"pii\":false,\"sensitivity\":\"internal\",\"note\":null},{\"column_name\":\"signup_date\",\"description\":\"The calendar date this customer's account was created.\",\"business_term\":\"signup_date\",\"pii\":false,\"sensitivity\":\"internal\",\"note\":null},{\"column_name\":\"lifetime_value\",\"description\":\"Total historical revenue attributed to this customer across all of their orders to date, in USD.\",\"business_term\":\"lifetime_value\",\"pii\":false,\"sensitivity\":\"internal\",\"note\":null}],\"dataset_sensitivity\":\"confidential\",\"dataset_sensitivity_note\":\"Contains direct personal identifiers (email, first_name, last_name); classified confidential rather than merely internal because at least one column is personal data.\"}"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1180,
+    "output_tokens": 520
+  }
+}
