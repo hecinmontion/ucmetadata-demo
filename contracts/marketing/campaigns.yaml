@@ -1,0 +1,142 @@
+# workspace.marketing.campaigns -- well-covered but quality-red (adversarial demo).
+# Hand-authored throughout by a human (every field below is ai_proposed: false;
+# no AI drafter was involved -- see README "What's mocked") and applied for real
+# against the live `ucmeta` workspace. Coverage is complete and this contract
+# passes validate() and apply(), but dq_registry.evaluate_rules(...) against
+# workspace.marketing.campaigns already fails two rules -- a negative budget
+# (campaign 5003) and an end_date before start_date (campaign 5004). The
+# underlying rows are left as-seeded on purpose: coverage measures fill, not
+# correctness, and this contract is the evidence for that distinction, not a
+# bug to fix. See dq_registry.yaml and apply.py's module docstring (the
+# certification-vs-evidence check is not wired into validate()/apply() yet,
+# which is why this contract's "silver" certification claim is accepted today
+# even though the DQ evidence for this table does not support it).
+version: 1
+dataset:
+  qualifier:
+    catalog: workspace
+    schema: marketing
+    table: campaigns
+  owner:
+    business_application_id: BA-20144
+  refresh:
+    cadence: daily
+    sla_minutes: 60
+  retention_days: 365
+  certification: silver
+  description: 'Marketing campaign records: one row per time-bounded campaign, its
+    channel, budget and active window. Known data-quality issues on two rows (see
+    dq_registry.yaml) are tracked, not yet remediated.'
+  sensitivity:
+    value: internal
+    ai_proposed: false
+columns:
+- name: campaign_id
+  data_type: bigint
+  nullable: true
+  partition_key: false
+  description:
+    value: Surrogate primary key identifying one campaign.
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags:
+  - primary_key
+- name: name
+  data_type: string
+  nullable: true
+  partition_key: false
+  description:
+    value: Human-readable campaign name, as entered by the marketing team.
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: channel
+  data_type: string
+  nullable: true
+  partition_key: false
+  description:
+    value: The marketing route this campaign runs through (e.g. email, social, search).
+    ai_proposed: false
+  business_term:
+    value: channel
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: budget
+  data_type: decimal(10,2)
+  nullable: true
+  partition_key: false
+  description:
+    value: Spend approved for this campaign, in USD, fixed at creation.
+    ai_proposed: false
+  business_term:
+    value: budget
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: start_date
+  data_type: date
+  nullable: true
+  partition_key: false
+  description:
+    value: Calendar date this campaign's active window begins.
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: end_date
+  data_type: date
+  nullable: true
+  partition_key: false
+  description:
+    value: Calendar date this campaign's active window ends. Expected on or after
+      start_date.
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: active
+  data_type: boolean
+  nullable: true
+  partition_key: false
+  description:
+    value: Whether this campaign is currently running.
+    ai_proposed: false
+  business_term:
+    value: campaign
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []

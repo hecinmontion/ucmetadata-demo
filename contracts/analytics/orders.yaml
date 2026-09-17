@@ -1,0 +1,68 @@
+# workspace.analytics.orders -- grandfathered, not yet reviewed (two-speed rollout).
+# Harvested for real against the live `ucmeta` workspace and left untouched since:
+# every judgment field is genuinely blank, and the four dataset-level fields below
+# still carry harvest.py's own placeholder sentinels (TODO description, bronze
+# certification, 1-day retention). This is not a polished file pretending to be
+# unfinished -- `ucmeta validate contracts/analytics/orders.yaml` fails against it
+# today, naming each placeholder by name. That failure is the point: this dataset
+# predates the contract gate and is grandfathered rather than blocked (spec
+# Rules & Constraints, "grandfathered for existing" datasets).
+#
+# TODO(repo owner, before presenting this walkthrough): AI-proposed content has
+# not been generated yet anywhere in this repo. `propose.py` is built, tested
+# (see tests/unit/test_propose.py) and proven against hand-authored fixture
+# responses, but every contract shipped here -- including this one -- was written
+# directly by a human, not drafted by the AI, because this build session had no
+# ANTHROPIC_API_KEY available. Run `ucmeta propose contracts/analytics/orders.yaml
+# --in-place` (or against a chosen contract) with a real ANTHROPIC_API_KEY to get a
+# genuine AI-drafted proposal before the interview. This table's `state` column is
+# deliberately ambiguous (order status vs. US state abbreviation -- see
+# scripts/seed_demo_data.sql and glossary/terms.yaml's `order_status` entry) and is
+# the best candidate for demonstrating the drafter's low-confidence-flagging
+# behaviour live.
+version: 1
+dataset:
+  qualifier:
+    catalog: workspace
+    schema: analytics
+    table: orders
+  owner:
+    business_application_id: BA-30587
+  refresh:
+    cadence: 'TODO(human): declare a cadence, e.g. daily'
+    sla_minutes: 1
+  retention_days: 1
+  certification: bronze
+  description: 'TODO(human): describe this dataset -- harvest cannot know this; it
+    is never harvested.'
+columns:
+- name: order_id
+  data_type: bigint
+  nullable: true
+  partition_key: false
+  tags: []
+- name: customer_id
+  data_type: bigint
+  nullable: true
+  partition_key: false
+  tags: []
+- name: state
+  data_type: string
+  nullable: true
+  partition_key: false
+  tags: []
+- name: amount
+  data_type: decimal(10,2)
+  nullable: true
+  partition_key: false
+  tags: []
+- name: order_ts
+  data_type: timestamp
+  nullable: true
+  partition_key: false
+  tags: []
+- name: channel
+  data_type: string
+  nullable: true
+  partition_key: false
+  tags: []

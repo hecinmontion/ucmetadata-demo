@@ -1,0 +1,136 @@
+# workspace.analytics.customers -- happy-path contract (SC-001-01).
+# Harvested for real against the live `ucmeta` workspace and hand-authored by a
+# human throughout (every field below is ai_proposed: false; no AI drafter was
+# involved -- see README "What's mocked"). Descriptions, tags and properties on
+# this table were already applied live in a prior smoke test; this file is that
+# same content re-harvested and declared back into the contract.
+version: 1
+dataset:
+  qualifier:
+    catalog: workspace
+    schema: analytics
+    table: customers
+  owner:
+    business_application_id: BA-10231
+  refresh:
+    cadence: daily
+    sla_minutes: 120
+  retention_days: 730
+  certification: silver
+  description: Customer master records for the direct-to-consumer storefront.
+  sensitivity:
+    value: confidential
+    ai_proposed: false
+columns:
+- name: customer_id
+  data_type: bigint
+  nullable: true
+  partition_key: false
+  description:
+    value: Surrogate primary key identifying one customer.
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags:
+  - primary_key
+- name: email
+  data_type: string
+  nullable: true
+  partition_key: false
+  description:
+    value: Customer's primary electronic contact address.
+    ai_proposed: false
+  business_term:
+    value: email
+    ai_proposed: false
+  pii:
+    value: true
+    ai_proposed: false
+  sensitivity:
+    value: confidential
+    ai_proposed: false
+  tags: []
+- name: first_name
+  data_type: string
+  nullable: true
+  partition_key: false
+  description:
+    value: Customer's given name, as provided at signup.
+    ai_proposed: false
+  pii:
+    value: true
+    ai_proposed: false
+  sensitivity:
+    value: confidential
+    ai_proposed: false
+  tags: []
+- name: last_name
+  data_type: string
+  nullable: true
+  partition_key: false
+  description:
+    value: Customer's family name, as provided at signup.
+    ai_proposed: false
+  pii:
+    value: true
+    ai_proposed: false
+  sensitivity:
+    value: confidential
+    ai_proposed: false
+  tags: []
+- name: region
+  data_type: string
+  nullable: true
+  partition_key: false
+  description:
+    value: Coarse geographic market this customer is associated with.
+    ai_proposed: false
+  business_term:
+    value: region
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: signup_date
+  data_type: date
+  nullable: true
+  partition_key: false
+  description:
+    value: Calendar date this customer's account was created.
+    ai_proposed: false
+  business_term:
+    value: signup_date
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: lifetime_value
+  data_type: decimal(10,2)
+  nullable: true
+  partition_key: false
+  description:
+    value: Total historical revenue attributed to this customer across all orders
+      to date, in USD.
+    ai_proposed: false
+  business_term:
+    value: lifetime_value
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []

@@ -30,6 +30,19 @@ being a public-repo GitHub Actions secret — CI proves the gate *mechanism*
 forks this repo; the live, `--live`-flagged loop against the real workspace
 is a local, human-run demonstration.
 
+**AI-proposed content has not been generated yet in this repo.** `propose.py` is
+built, tested (see `tests/unit/test_propose.py`), and proven against
+hand-authored fixture responses, but every contract shipped under `contracts/`
+was written directly by a human, not drafted by the AI — this build session ran
+with no `ANTHROPIC_API_KEY` available, and fabricating what a model "would have
+said" into an `ai_proposed: true` field would be worse than leaving the field
+human-authored. Before presenting this walkthrough, run `ucmeta propose
+contracts/analytics/orders.yaml --in-place` (or against a chosen contract) with a
+real `ANTHROPIC_API_KEY` to get a genuine AI-drafted proposal — `orders.state` is
+deliberately ambiguous (order status vs. US state abbreviation) and is the best
+candidate for demonstrating the drafter's low-confidence-flagging behaviour live.
+This is a real, unclosed loop, not a completed part of the build.
+
 ## Trade-offs
 
 TODO.
