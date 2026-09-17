@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""Thin executable wrapper around `uc_metadata.cli.main`.
+
+All real logic lives in `src/uc_metadata/cli.py`; this script exists so a
+reviewer can run `./cli/ucmeta ...` straight from a git checkout with no
+install step -- the same "clone and run" promise the spec's Users & Roles
+section makes for the interview panel. `pip install -e .` (via the
+`[project.scripts]` entry in `pyproject.toml`) gives a `ucmeta` command on
+PATH that calls the exact same `main()`; this script is the no-install path
+to that same code, not a second implementation of it.
+"""
+
+import sys
+from pathlib import Path
+
+# Make `src/uc_metadata` importable without an editable install -- mirrors
+# pyproject.toml's `[tool.pytest.ini_options] pythonpath = ["src"]` convention
+# for the test suite's own fast inner loop.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from uc_metadata.cli import main  # noqa: E402 -- must follow the sys.path insert above
+
+if __name__ == "__main__":
+    sys.exit(main())
