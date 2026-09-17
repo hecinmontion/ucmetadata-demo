@@ -269,7 +269,10 @@ class FakeUCClient:
     Every write method builds and returns the same SQL string shape `RealUCClient`
     would run (via the same `uc_client.quote_*`/`kv_clause` helpers), so tests that
     assert on "exact COMMENT ON string" (the `apply.py` build verdict's requirement)
-    get the same string offline as they would against the live workspace.
+    get the same string offline as they would against the live workspace. Every
+    write method also accepts the same `dry_run` keyword `RealUCClient` does: the
+    SQL is built the same way regardless, and mutating `self._tables` is the only
+    step `dry_run=True` skips.
     """
 
     def __init__(self, tables: Dict[str, _FakeTable] | None = None) -> None:
@@ -309,47 +312,68 @@ class FakeUCClient:
 
     # ---- writes ------------------------------------------------------------------
 
-    def set_table_comment(self, full_name: str, comment: str) -> str:
+    def set_table_comment(self, full_name: str, comment: str, *, dry_run: bool = False) -> str:
         require_three_part_name(full_name)
+        sql = f"COMMENT ON TABLE {quote_full_name(full_name)} IS {quote_literal(comment)}"
+        if dry_run:
+            return sql
         table = self._require_table(full_name)
         table.comment = comment
-        return f"COMMENT ON TABLE {quote_full_name(full_name)} IS {quote_literal(comment)}"
+        return sql
 
-    def set_column_comment(self, full_name: str, column_name: str, comment: str) -> str:
+    def set_column_comment(
+        self, full_name: str, column_name: str, comment: str, *, dry_run: bool = False
+    ) -> str:
         require_three_part_name(full_name)
-        column = self._require_column(full_name, column_name)
-        column.comment = comment
-        return (
+        sql = (
             f"COMMENT ON COLUMN {quote_full_name(full_name)}.{quote_ident(column_name)} "
             f"IS {quote_literal(comment)}"
         )
+        if dry_run:
+            return sql
+        column = self._require_column(full_name, column_name)
+        column.comment = comment
+        return sql
 
-    def set_table_properties(self, full_name: str, properties: Mapping[str, str]) -> str:
+    def set_table_properties(
+        self, full_name: str, properties: Mapping[str, str], *, dry_run: bool = False
+    ) -> str:
         require_three_part_name(full_name)
         if not properties:
             raise ValueError("properties must not be empty")
+        sql = f"ALTER TABLE {quote_full_name(full_name)} SET TBLPROPERTIES ({kv_clause(properties)})"
+        if dry_run:
+            return sql
         table = self._require_table(full_name)
         table.properties.update(properties)  # merge, same semantics as SET TBLPROPERTIES
-        return f"ALTER TABLE {quote_full_name(full_name)} SET TBLPROPERTIES ({kv_clause(properties)})"
+        return sql
 
-    def set_table_tags(self, full_name: str, tags: Mapping[str, str]) -> str:
+    def set_table_tags(self, full_name: str, tags: Mapping[str, str], *, dry_run: bool = False) -> str:
         require_three_part_name(full_name)
         if not tags:
             raise ValueError("tags must not be empty")
+        sql = f"ALTER TABLE {quote_full_name(full_name)} SET TAGS ({kv_clause(tags)})"
+        if dry_run:
+            return sql
         table = self._require_table(full_name)
         table.tags.update(tags)  # merge, same semantics as SET TAGS
-        return f"ALTER TABLE {quote_full_name(full_name)} SET TAGS ({kv_clause(tags)})"
+        return sql
 
-    def set_column_tags(self, full_name: str, column_name: str, tags: Mapping[str, str]) -> str:
+    def set_column_tags(
+        self, full_name: str, column_name: str, tags: Mapping[str, str], *, dry_run: bool = False
+    ) -> str:
         require_three_part_name(full_name)
         if not tags:
             raise ValueError("tags must not be empty")
-        column = self._require_column(full_name, column_name)
-        column.tags.update(tags)  # merge, same semantics as ALTER COLUMN ... SET TAGS
-        return (
+        sql = (
             f"ALTER TABLE {quote_full_name(full_name)} ALTER COLUMN {quote_ident(column_name)} "
             f"SET TAGS ({kv_clause(tags)})"
         )
+        if dry_run:
+            return sql
+        column = self._require_column(full_name, column_name)
+        column.tags.update(tags)  # merge, same semantics as ALTER COLUMN ... SET TAGS
+        return sql
 
     # ---- internal lookups ----------------------------------------------------
 

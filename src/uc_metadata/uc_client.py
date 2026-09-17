@@ -25,6 +25,18 @@ Design decisions worth stating rather than leaving implicit:
   cleanly with no error and no observable change (verified against the live
   workspace) -- `apply.py`'s idempotency claim rests on that being true here, not
   rediscovered there.
+- Every write method takes a keyword-only `dry_run: bool = False`. With
+  `dry_run=True`, the method validates its own preconditions (three-part name,
+  non-empty properties/tags mapping) and returns the exact SQL string it would
+  run, but never touches catalogue state -- no statement is submitted on
+  `RealUCClient`, no in-memory table is mutated on `FakeUCClient`. This is the
+  one seam `apply.py`'s `plan_apply` needs (spec Rules & Constraints: "every
+  change request prints the full set of catalogue writes it would perform
+  before it can be merged") without duplicating any SQL-building logic: each
+  write method builds its `sql` variable exactly once, from the same code path,
+  before either returning it (`dry_run=True`) or executing it and then
+  returning it -- so a planned statement and the statement that later actually
+  runs can never silently diverge into two implementations.
 """
 
 from __future__ import annotations
@@ -96,7 +108,10 @@ class UCClient(Protocol):
     Postcondition on every `get_*`: raises `UCTableNotFoundError` if no such table
     exists, never returns a partial/`None` result silently. Postcondition on every
     `set_*`: either the write lands and the exact SQL string executed is returned, or
-    a `UCWriteError` is raised -- never a partial write.
+    a `UCWriteError` is raised -- never a partial write. Postcondition on every
+    `set_*` called with `dry_run=True`: no catalogue state changes (no statement
+    submitted, no in-memory table mutated), and the exact SQL string that write
+    would execute is returned.
     """
 
     def get_table(self, full_name: str) -> UCTable:
@@ -118,29 +133,42 @@ class UCClient(Protocol):
         """
         ...
 
-    def set_table_comment(self, full_name: str, comment: str) -> str:
-        """Set the table-level comment/description. Returns the SQL executed."""
+    def set_table_comment(self, full_name: str, comment: str, *, dry_run: bool = False) -> str:
+        """Set the table-level comment/description. Returns the SQL executed
+        (or, if `dry_run=True`, the SQL that would be executed, with no write made).
+        """
         ...
 
-    def set_column_comment(self, full_name: str, column_name: str, comment: str) -> str:
-        """Set one column's comment/description. Returns the SQL executed."""
+    def set_column_comment(
+        self, full_name: str, column_name: str, comment: str, *, dry_run: bool = False
+    ) -> str:
+        """Set one column's comment/description. Returns the SQL executed
+        (or, if `dry_run=True`, the SQL that would be executed, with no write made).
+        """
         ...
 
-    def set_table_properties(self, full_name: str, properties: Mapping[str, str]) -> str:
+    def set_table_properties(
+        self, full_name: str, properties: Mapping[str, str], *, dry_run: bool = False
+    ) -> str:
         """Merge `properties` into the table's TBLPROPERTIES (existing keys not
-        named in `properties` are left untouched). Returns the SQL executed.
+        named in `properties` are left untouched). Returns the SQL executed
+        (or, if `dry_run=True`, the SQL that would be executed, with no write made).
         Precondition: `properties` is non-empty.
         """
         ...
 
-    def set_table_tags(self, full_name: str, tags: Mapping[str, str]) -> str:
-        """Merge `tags` into the table's tags. Returns the SQL executed.
+    def set_table_tags(self, full_name: str, tags: Mapping[str, str], *, dry_run: bool = False) -> str:
+        """Merge `tags` into the table's tags. Returns the SQL executed
+        (or, if `dry_run=True`, the SQL that would be executed, with no write made).
         Precondition: `tags` is non-empty.
         """
         ...
 
-    def set_column_tags(self, full_name: str, column_name: str, tags: Mapping[str, str]) -> str:
-        """Merge `tags` into one column's tags. Returns the SQL executed.
+    def set_column_tags(
+        self, full_name: str, column_name: str, tags: Mapping[str, str], *, dry_run: bool = False
+    ) -> str:
+        """Merge `tags` into one column's tags. Returns the SQL executed
+        (or, if `dry_run=True`, the SQL that would be executed, with no write made).
         Precondition: `tags` is non-empty.
         """
         ...
@@ -303,38 +331,52 @@ class RealUCClient:
 
     # ---- writes ------------------------------------------------------------------
 
-    def set_table_comment(self, full_name: str, comment: str) -> str:
+    def set_table_comment(self, full_name: str, comment: str, *, dry_run: bool = False) -> str:
         require_three_part_name(full_name)
         sql = f"COMMENT ON TABLE {quote_full_name(full_name)} IS {quote_literal(comment)}"
+        if dry_run:
+            return sql
         self._run_statement(sql)
         return sql
 
-    def set_column_comment(self, full_name: str, column_name: str, comment: str) -> str:
+    def set_column_comment(
+        self, full_name: str, column_name: str, comment: str, *, dry_run: bool = False
+    ) -> str:
         require_three_part_name(full_name)
         sql = (
             f"COMMENT ON COLUMN {quote_full_name(full_name)}.{quote_ident(column_name)} "
             f"IS {quote_literal(comment)}"
         )
+        if dry_run:
+            return sql
         self._run_statement(sql)
         return sql
 
-    def set_table_properties(self, full_name: str, properties: Mapping[str, str]) -> str:
+    def set_table_properties(
+        self, full_name: str, properties: Mapping[str, str], *, dry_run: bool = False
+    ) -> str:
         require_three_part_name(full_name)
         if not properties:
             raise ValueError("properties must not be empty")
         sql = f"ALTER TABLE {quote_full_name(full_name)} SET TBLPROPERTIES ({kv_clause(properties)})"
+        if dry_run:
+            return sql
         self._run_statement(sql)
         return sql
 
-    def set_table_tags(self, full_name: str, tags: Mapping[str, str]) -> str:
+    def set_table_tags(self, full_name: str, tags: Mapping[str, str], *, dry_run: bool = False) -> str:
         require_three_part_name(full_name)
         if not tags:
             raise ValueError("tags must not be empty")
         sql = f"ALTER TABLE {quote_full_name(full_name)} SET TAGS ({kv_clause(tags)})"
+        if dry_run:
+            return sql
         self._run_statement(sql)
         return sql
 
-    def set_column_tags(self, full_name: str, column_name: str, tags: Mapping[str, str]) -> str:
+    def set_column_tags(
+        self, full_name: str, column_name: str, tags: Mapping[str, str], *, dry_run: bool = False
+    ) -> str:
         require_three_part_name(full_name)
         if not tags:
             raise ValueError("tags must not be empty")
@@ -342,6 +384,8 @@ class RealUCClient:
             f"ALTER TABLE {quote_full_name(full_name)} ALTER COLUMN {quote_ident(column_name)} "
             f"SET TAGS ({kv_clause(tags)})"
         )
+        if dry_run:
+            return sql
         self._run_statement(sql)
         return sql
 

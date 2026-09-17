@@ -208,3 +208,44 @@ def test_write_methods_reject_empty_property_and_tag_maps(client: UCClient):
         client.set_table_properties(TABLE, {})
     with pytest.raises(ValueError):
         client.set_table_tags(TABLE, {})
+
+
+# ---- dry_run: apply.py's "print what would be written" seam ---------------------
+
+
+def test_dry_run_write_methods_return_sql_without_changing_catalogue_state(client: UCClient):
+    """Every write method's `dry_run=True` form returns the exact SQL string the
+    non-dry-run call would run, but leaves the catalogue untouched -- this is the
+    seam `apply.py`'s `plan_apply` depends on to print writes before merge without
+    ever performing one (spec Rules & Constraints: "every change request prints
+    the full set of catalogue writes it would perform before it can be merged")."""
+    before = client.get_table(TABLE)
+
+    table_comment_sql = client.set_table_comment(TABLE, "dry run only -- should never land", dry_run=True)
+    column_comment_sql = client.set_column_comment(
+        TABLE, "email", "dry run only -- should never land", dry_run=True
+    )
+    properties_sql = client.set_table_properties(
+        TABLE, {"uc_metadata.dry_run_contract_test": "true"}, dry_run=True
+    )
+    table_tags_sql = client.set_table_tags(TABLE, {"dry_run_contract_test": "true"}, dry_run=True)
+    column_tags_sql = client.set_column_tags(TABLE, "email", {"dry_run_contract_test": "true"}, dry_run=True)
+
+    assert "COMMENT ON TABLE" in table_comment_sql
+    assert "COMMENT ON COLUMN" in column_comment_sql
+    assert "SET TBLPROPERTIES" in properties_sql
+    assert "ALTER TABLE" in table_tags_sql and "SET TAGS" in table_tags_sql
+    assert "ALTER COLUMN" in column_tags_sql and "SET TAGS" in column_tags_sql
+
+    after = client.get_table(TABLE)
+    assert after == before  # nothing in the catalogue changed
+
+
+def test_dry_run_still_enforces_preconditions(client: UCClient):
+    """`dry_run=True` still validates its own preconditions -- an empty
+    properties/tags mapping is refused the same way it would be for a real
+    write, rather than silently planning invalid DDL."""
+    with pytest.raises(ValueError):
+        client.set_table_properties(TABLE, {}, dry_run=True)
+    with pytest.raises(ValueError):
+        client.set_table_tags(TABLE, {}, dry_run=True)
