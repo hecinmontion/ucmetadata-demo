@@ -34,6 +34,12 @@ where = ["src"]
 # network at all") doesn't also need a packaging step.
 pythonpath = ["src"]
 testpaths = ["tests"]
+# Default collection glob (`test_*.py`/`*_test.py`) plus demo_scenario.py by
+# name: tests/e2e/demo_scenario.py is a runnable script first (`python
+# tests/e2e/demo_scenario.py [--live]`) and a pytest module second, and its
+# name is what the spec/build verdict names explicitly -- renaming it to
+# test_demo_scenario.py to satisfy pytest's default glob would fight that.
+python_files = ["test_*.py", "demo_scenario.py"]
 markers = [
     "scenario: binds a test to a scenario ID in specs/F-PLATFORM-001-uc-metadata-contracts.md",
     "uc_live: exercises RealUCClient against the live Free Edition workspace; needs network and the ucmeta OAuth profile, gated by UC_LIVE_TESTS=1",
