@@ -317,6 +317,24 @@ choices, marked as such.
   described, not built.
 - **Observability of the tooling itself, lineage capture, multi-region apply paths, and consumer
   feedback routing.** All designed or named, none implemented.
+- **A bounded YAML loader.** `Contract.from_yaml` uses `yaml.safe_load`, which has no built-in
+  limit on anchor/alias expansion — a maliciously crafted contract file could expand a few KB of
+  text into gigabytes in memory ("billion laughs"). `validate.yml` parses every PR's changed
+  contracts unattended, before a human looks at them, so this isn't purely theoretical if the
+  repository ever accepts PRs from people who haven't already been vetted through `CODEOWNERS`.
+  Not built here — the fix is a size/depth-bounded loader (or simply rejecting any contract that
+  contains an anchor or alias at all, since contracts have no legitimate use for either).
+- **Unicode bidi-control character handling in reviewed text.** Characters like U+202E
+  (right-to-left override) can make what a reviewer *sees* in a diff differ from the actual bytes —
+  the "Trojan Source" class of attack. This matters specifically because SC-001-03's whole safety
+  argument rests on a human genuinely reading what they're clearing the `ai_proposed` marker on.
+  Nothing today strips, flags, or rejects these characters in `description`/`note` fields. Not
+  built here — the fix is a lint/validate-time check that flags or rejects bidi-control code points
+  in any human-reviewable text field.
+
+Both of the above were found, not invented, by an adversarial test pass — deliberately scoped out
+rather than fixed, on the judgment that a CODEOWNERS-gated prototype reviewed by people who already
+trust each other doesn't need them yet, not on the judgment that they don't matter.
 
 Two process notes, for the same reason everything else here is stated plainly. A stray test
 artifact was committed and had to be cleaned up before push (the shipped-contracts commit is
