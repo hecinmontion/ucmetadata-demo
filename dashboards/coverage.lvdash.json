@@ -1,0 +1,256 @@
+{
+  "datasets": [
+    {
+      "name": "ds_current",
+      "displayName": "Current coverage (latest run)",
+      "queryLines": [
+        "SELECT full_name, team, dataset_fill_rate, certification_tier, certification_supported_by_evidence FROM workspace.platform.coverage_history WHERE run_id = (SELECT run_id FROM workspace.platform.coverage_history ORDER BY run_timestamp DESC LIMIT 1) ORDER BY full_name"
+      ]
+    },
+    {
+      "name": "ds_trend",
+      "displayName": "Coverage trend by run",
+      "queryLines": [
+        "SELECT run_timestamp, AVG(dataset_fill_rate) AS avg_fill_rate FROM workspace.platform.coverage_history GROUP BY run_timestamp ORDER BY run_timestamp"
+      ]
+    },
+    {
+      "name": "ds_outcome",
+      "displayName": "Outcome measure (latest run, SIMULATED)",
+      "queryLines": [
+        "SELECT outcome_measure_name, AVG(outcome_measure_value) AS avg_value, outcome_measure_unit FROM workspace.platform.coverage_history WHERE run_id = (SELECT run_id FROM workspace.platform.coverage_history ORDER BY run_timestamp DESC LIMIT 1) GROUP BY outcome_measure_name, outcome_measure_unit"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_coverage",
+      "displayName": "Coverage",
+      "layout": [
+        {
+          "widget": {
+            "name": "w_overall_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_current",
+                  "fields": [
+                    {
+                      "name": "avg(dataset_fill_rate)",
+                      "expression": "AVG(`dataset_fill_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(dataset_fill_rate)",
+                  "displayName": "Overall fill rate (latest run)",
+                  "format": {
+                    "type": "number-percent"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Overall fill rate (latest run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_outcome_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_outcome",
+                  "fields": [
+                    {
+                      "name": "avg_value",
+                      "expression": "`avg_value`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg_value",
+                  "displayName": "Time to first query (days) -- SIMULATED, not real telemetry"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Time to first query (days) -- SIMULATED, not real telemetry"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_current_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_current",
+                  "fields": [
+                    {
+                      "name": "full_name",
+                      "expression": "`full_name`"
+                    },
+                    {
+                      "name": "team",
+                      "expression": "`team`"
+                    },
+                    {
+                      "name": "dataset_fill_rate",
+                      "expression": "`dataset_fill_rate`"
+                    },
+                    {
+                      "name": "certification_tier",
+                      "expression": "`certification_tier`"
+                    },
+                    {
+                      "name": "certification_supported_by_evidence",
+                      "expression": "`certification_supported_by_evidence`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "full_name",
+                    "displayName": "Dataset",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "team",
+                    "displayName": "Team",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "dataset_fill_rate",
+                    "displayName": "Fill rate",
+                    "type": "float"
+                  },
+                  {
+                    "fieldName": "certification_tier",
+                    "displayName": "Certification",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "certification_supported_by_evidence",
+                    "displayName": "Evidence supports tier?",
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Coverage by dataset (latest run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "w_trend_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_trend",
+                  "fields": [
+                    {
+                      "name": "run_timestamp",
+                      "expression": "`run_timestamp`"
+                    },
+                    {
+                      "name": "avg_fill_rate",
+                      "expression": "`avg_fill_rate`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "run_timestamp",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Run"
+                },
+                "y": {
+                  "fieldName": "avg_fill_rate",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Overall fill rate"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Overall fill rate trend across runs"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 4,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "genieSpace": {
+      "isEnabled": false,
+      "enablementMode": "ENABLEMENT_MODE_UNSPECIFIED"
+    }
+  }
+}
