@@ -1,9 +1,10 @@
 # ADR-008: Coverage history as a Unity Catalog table, with a native AI/BI dashboard over it
 
-- **Status:** Accepted; table and publish step built (`workspace.platform.coverage_history`,
-  `coverage_history.py`, `ucmeta coverage --publish-history`, live-verified with two real runs).
-  The dashboard definition (`.lvdash.json`) is a separate, later phase and is not built yet —
-  `dashboard/app.py` is unchanged and stays that way
+- **Status:** Accepted and built. Table and publish step: `workspace.platform.coverage_history`,
+  `coverage_history.py`, `ucmeta coverage --publish-history`, live-verified with two real runs.
+  Dashboard definition: `dashboards/coverage.lvdash.json`, built via route (a) below, created and
+  published against the real workspace with zero errors on both calls, redeployable via
+  `scripts/deploy_coverage_dashboard.sh`. `dashboard/app.py` is unchanged and stays that way
 - **Date:** 2026-09-18
 - **Decider:** hector
 - **Affects:** `src/uc_metadata/coverage.py` (a publish-history step behind one narrow interface),
@@ -108,6 +109,17 @@ satisfies that claim identically; only the authoring ergonomics differ. What wou
 acceptable is a dashboard existing solely as workspace state, which would make the observability
 layer the single exception to this project's GitOps posture — in exactly the place auditability
 matters most.
+
+**Outcome: (a) worked, (c) was not needed.** Every dataset's SQL was verified standalone against
+`workspace.platform.coverage_history` before being embedded in the dashboard; the resulting
+definition was created and then published against the real workspace, and both calls succeeded
+with zero errors. The exported, API-normalised definition — not a hand-typed one — is what is
+committed at `dashboards/coverage.lvdash.json`. One honest limit remains, stated plainly rather
+than glossed: `create` and `publish` succeeding proves the definition is structurally valid and
+genuinely queryable against real data, not that the page renders correctly, since neither the CLI
+nor this session has a way to see pixels. That last check — opening the dashboard once in the
+workspace before presenting it — is the repo owner's, not something route (a) could close on its
+own.
 
 ### Who can see the dashboard
 
