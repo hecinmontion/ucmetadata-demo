@@ -56,10 +56,29 @@ reviewer can open rather than something the README asserts.
   verdict (`ValidationResult.ok` plus specific named problems) rather than printing prose. That
   function *is* the integration point; wiring it into the provisioning flow and the grant flow is
   a one-call integration into flows that already exist.
-- The prototype builds the check, not the gates. The centrally-owned Terraform/business-
-  application-id provisioning flow and grant issuance belong to the target organisation's
-  platform; neither is this prototype's to build or to simulate convincingly. That boundary is
-  named in Out of Scope and in the README, not glossed.
+- The prototype builds the check, not the gates. Provisioning and grant issuance belong to the
+  target organisation's platform, and the natural home for both is Terraform, not this codebase —
+  `databricks_catalog`/`databricks_schema` for provisioning a new dataset, `databricks_grants`/
+  `databricks_grant` for read-grant issuance, both real resources in the official Databricks
+  Terraform provider. That is not a guess at what production would look like: `dc-managed-services`
+  already provisions Databricks workspaces and storage this way, keyed to the same
+  business-application id this prototype's contracts already carry. The gate, concretely, is a
+  Terraform plan that runs `ucmeta validate <contract>` (or calls `validate.validate_yaml` from a
+  wrapping script) before a `databricks_catalog`/`databricks_schema`/`databricks_grants` resource
+  is allowed to apply — a `terraform plan` output, or a CI check gating `terraform apply`, refusing
+  to proceed while the linked contract fails.
+- **Deliberately not built, and not a gap the rest of this codebase should imitate.** Provisioning
+  and grants are infrequent, deliberate, state-tracked changes — exactly what Terraform's
+  plan/apply/state model is for. Applying a contract's *content* (`apply.py`, via `uc_client.py`)
+  is the opposite: high-frequency, driven by arbitrary human-reviewed text, and expected to run the
+  moment a PR merges. Routing that through Terraform would mean generating `.tf` files per
+  contract, maintaining a state file that drifts from reality between every merge, and paying a
+  plan/apply cycle for what one `COMMENT ON` statement already does directly — the over-engineering
+  this prototype's own "refuses to over-engineer" trade-off argues against elsewhere. Terraform is
+  right for the boundary this ADR gates; it would be wrong for the content this platform authors.
+  Building the Terraform side now would also add a second toolchain (state backend, provider
+  credentials) to maintain before the walkthrough, for a component nobody in the room can watch
+  run — the check it would gate on (`validate.py`) is already real and already demonstrated.
 - **Residual gap, stated plainly:** an existing dataset whose owner never needs a new grant is
   untouched by the gate. It will be moved, if at all, by coverage visibility. And on contracted
   datasets, drift is detected rather than prevented — a column can exist undescribed for as long
