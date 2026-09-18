@@ -31,8 +31,15 @@ where = ["src"]
 [tool.pytest.ini_options]
 # Lets `pytest` import `uc_metadata` straight from `src/` without an editable install,
 # so the fast inner loop (NFR: "unit tests run against the in-repo fake ... need no
-# network at all") doesn't also need a packaging step.
-pythonpath = ["src"]
+# network at all") doesn't also need a packaging step. The repo root is also needed:
+# `dashboard/app.py` is a top-level package (not under src/), and `python -m pytest`
+# happens to add cwd to sys.path automatically while a bare `pytest`/`uv run pytest`
+# invocation does not -- without this, `tests/unit/test_dashboard.py` and
+# `test_coverage_history.py` (which imports dashboard.app for its smoke test) fail to
+# collect under the exact invocation `.github/workflows/validate.yml` uses
+# (`uv run pytest ...`), a real CI-breaking gap only caught by reproducing that exact
+# command locally, not by running tests through `python -m pytest`.
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 # Default collection glob (`test_*.py`/`*_test.py`) plus demo_scenario.py by
 # name: tests/e2e/demo_scenario.py is a runnable script first (`python
