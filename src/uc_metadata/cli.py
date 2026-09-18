@@ -181,11 +181,18 @@ def _cmd_propose(
     the real Anthropic API, gated only by `ANTHROPIC_API_KEY`). It is a
     keyword-only seam on this function (and threaded through `main`) so a test
     can inject `llm_fixture_transport`'s replay client and exercise the CLI's
-    own argument-wiring offline, without ever needing a real API key."""
-    contract = Contract.from_yaml(args.contract)
-    result = propose_contract(contract, client, llm_client=llm_client)
+    own argument-wiring offline, without ever needing a real API key.
 
+    Always passes `contract_path=output_path` to `propose_contract` (this is
+    the one layer that decides where the updated contract is about to be
+    written -- `--in-place` or `-o`/`--output` -- so it is the one layer that
+    can hand `propose.py` the path its `.audit.json` sibling belongs next to;
+    see `propose.py`'s module docstring for the audit record's shape).
+    """
+    contract = Contract.from_yaml(args.contract)
     output_path = args.contract if args.in_place else args.output
+    result = propose_contract(contract, client, llm_client=llm_client, contract_path=output_path)
+
     result.contract.to_yaml(output_path)
     print(f"Wrote updated contract to {output_path}")
     return 0

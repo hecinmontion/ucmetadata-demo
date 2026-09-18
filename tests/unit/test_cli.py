@@ -254,6 +254,20 @@ def test_propose_cli_wires_arguments_through_using_the_fixture_replay_client(tmp
     assert updated.columns[0].description.ai_proposed is True  # drafted, not yet reviewed
 
 
+def test_propose_cli_writes_an_audit_record_next_to_the_output_contract(tmp_path: Path):
+    """`_cmd_propose` always supplies `contract_path` (see its docstring), so
+    the CLI's own propose verb -- not just calling `propose()` directly -- is
+    what actually produces the `.audit.json` sibling a reviewer would find."""
+    contract_path = tmp_path / "customers.yaml"
+    harvest(TABLE, FakeUCClient(), KNOWN_BA_ID).to_yaml(contract_path)
+    llm_client = build_llm_client(CUSTOMERS_FIXTURE)
+
+    exit_code = cli.main(["propose", str(contract_path), "--in-place"], llm_client=llm_client)
+
+    assert exit_code == 0
+    assert (tmp_path / "customers.audit.json").exists()
+
+
 # ---- malformed input: a clean one-line error, not a raw traceback ----------------
 
 

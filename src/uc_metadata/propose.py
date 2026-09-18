@@ -37,6 +37,32 @@ Every call prints its model, token counts, dollar cost and wall-clock latency
 (Non-functional Requirements: "its latency and cost are printed") and also
 returns them as `ProposalMetrics`, so a future CLI caller can surface them
 without re-parsing stdout.
+
+Every call is also auditable on disk (Rules & Constraints: "every AI proposal
+is auditable: model, version, prompt, inputs, timestamp ... are recorded and
+survive as long as the contract"). When `propose()` is given `contract_path`
+(the path the caller is about to write the updated contract to -- `cli.py`'s
+`propose` verb always passes this), it writes a `.audit.json` file next to
+that contract (`contracts/analytics/customers.yaml` ->
+`contracts/analytics/customers.audit.json`), via `write_audit_record`. That
+file records the model name/version, a timestamp, both prompts sent, and the
+column-level inputs (names plus the same masked sample values that actually
+left this module -- never a raw PII value, by construction, since it is the
+same `samples_by_column` mapping the request itself was built from).
+
+Deliberately not recorded in that file: per-field acceptance state (which
+`ai_proposed` markers were later cleared by a reviewer). The design chosen
+here is (b) from the two options a durable audit trail could take: an audit
+file that only records what was *proposed*, with acceptance read live from
+the contract itself at read time (`Contract.unreviewed_field_paths`), rather
+than (a) a second write, on every review/save, that updates this file's own
+copy of acceptance state. (a) would need a new integration point wherever a
+contract gets reviewed and re-saved -- there is no single such place yet, only
+a human editing YAML by hand -- and would leave this file able to drift out of
+sync with the contract it describes, which is a second source of truth this
+module has no way to keep honest. (b) costs one join at read time (which
+fields in `columns_proposed` are still `ai_proposed=True` on the live
+contract) and never drifts, because it never copies the answer anywhere.
 """
 
 from __future__ import annotations
@@ -44,7 +70,9 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import anthropic
 from pydantic import BaseModel, Field
@@ -167,6 +195,107 @@ class ProposeResult:
     metrics: ProposalMetrics
 
 
+# ---- the durable audit record (Rules & Constraints: "every AI proposal is
+# auditable") -- see this module's docstring for the acceptance-state design
+# choice (b) this record deliberately does not implement. -----------------------
+
+
+class ColumnProposalAudit(BaseModel):
+    """One column's inputs, exactly as sent to the drafter for one `propose()`
+    call. `masked_sample_values` is the same list `_masked_sample_values`
+    already produced for the request itself -- never a second, independently
+    computed copy that could mask differently -- so this record can never show
+    a value the request did not already show."""
+
+    column_name: str
+    samples_masked: bool = Field(
+        description="Whether at least one sample value sent for this column was masked before it left this module."
+    )
+    masked_sample_values: List[Any] = Field(
+        default_factory=list,
+        description="The (already-masked) sample values sent to the drafter for this column -- never raw.",
+    )
+
+
+class ProposalAuditRecord(BaseModel):
+    """The on-disk audit record for one `propose()` call that actually asked
+    the drafter something (Rules & Constraints: "model, version, prompt,
+    inputs, timestamp ... recorded and survive as long as the contract").
+
+    Deliberately excludes per-field acceptance state -- see this module's
+    docstring for why: acceptance lives on the contract itself
+    (`Proposed.ai_proposed`), and is read from there, live, whenever it is
+    needed, rather than duplicated and re-synced here.
+    """
+
+    dataset_full_name: str
+    model: str
+    generated_at: datetime
+    system_prompt: str
+    user_prompt: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    latency_seconds: float
+    dataset_sensitivity_proposed: bool = Field(
+        description="Whether this call also proposed a dataset-level sensitivity roll-up."
+    )
+    columns_proposed: List[ColumnProposalAudit]
+
+
+def _audit_path_for_contract(contract_path: Union[str, Path]) -> Path:
+    """`contracts/analytics/customers.yaml` -> `contracts/analytics/customers.audit.json`
+    -- the sibling-file convention this module's docstring and the spec's Data
+    table both name ("stored as ... a `.audit.json` next to the contract")."""
+    path = Path(contract_path)
+    return path.with_name(f"{path.stem}.audit.json")
+
+
+def write_audit_record(record: ProposalAuditRecord, contract_path: Union[str, Path]) -> Path:
+    """Serialize `record` to `.audit.json` next to `contract_path`, overwriting
+    any previous audit record for this contract file (each `propose()` call
+    that reaches this function describes a fresh drafting pass, not an
+    append-only log the way `release_log.py` is -- the contract's own version
+    history is what preserves earlier drafts, the same way it preserves
+    earlier reviewed values). Returns the path written.
+    """
+    audit_path = _audit_path_for_contract(contract_path)
+    audit_path.write_text(record.model_dump_json(indent=2) + "\n")
+    return audit_path
+
+
+def _build_audit_record(
+    full_name: str,
+    columns_to_propose: List[Column],
+    samples_by_column: Dict[str, List[Any]],
+    metrics: ProposalMetrics,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+) -> ProposalAuditRecord:
+    columns_proposed = [
+        ColumnProposalAudit(
+            column_name=column.name,
+            samples_masked=any(value == _MASKED_VALUE for value in samples_by_column.get(column.name, [])),
+            masked_sample_values=samples_by_column.get(column.name, []),
+        )
+        for column in columns_to_propose
+    ]
+    return ProposalAuditRecord(
+        dataset_full_name=full_name,
+        model=metrics.model,
+        generated_at=datetime.now(timezone.utc),
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        input_tokens=metrics.input_tokens,
+        output_tokens=metrics.output_tokens,
+        cost_usd=metrics.cost_usd,
+        latency_seconds=metrics.latency_seconds,
+        dataset_sensitivity_proposed=True,
+        columns_proposed=columns_proposed,
+    )
+
+
 # ---- the public entry point ----------------------------------------------------
 
 
@@ -176,6 +305,7 @@ def propose(
     *,
     llm_client: Optional[anthropic.Anthropic] = None,
     sample_limit: int = 5,
+    contract_path: Optional[Union[str, Path]] = None,
 ) -> ProposeResult:
     """Fill in `contract`'s blank judgment fields by asking the AI drafter.
 
@@ -192,6 +322,16 @@ def propose(
     one; the dataset-level `sensitivity` is floored to at least `confidential`
     if any column was proposed `pii=True`. Also returns and prints
     `ProposalMetrics` (model, token counts, cost, latency).
+
+    `contract_path` is optional and defaults to `None`, which skips audit
+    persistence entirely (this is why every existing call site and test that
+    predates this parameter is unaffected). When given -- `cli.py`'s `propose`
+    verb always gives it, as the path the updated contract is about to be
+    written to -- a `ProposalAuditRecord` is written next to it as
+    `<name>.audit.json` (see `write_audit_record`, and this module's docstring
+    for what is and is not recorded there). No audit file is written when
+    there was nothing left to draft (no drafter call was made, so there is
+    nothing to audit).
 
     `llm_client` defaults to a zero-argument `anthropic.Anthropic()` (reads
     `ANTHROPIC_API_KEY` from the environment); tests inject a fixture-backed
@@ -218,6 +358,17 @@ def propose(
     active_llm_client = llm_client if llm_client is not None else anthropic.Anthropic()
     payload, metrics = _call_drafter(active_llm_client, system=system_prompt, user=user_prompt)
     print(metrics)
+
+    if contract_path is not None:
+        audit_record = _build_audit_record(
+            full_name,
+            columns_to_propose,
+            samples_by_column,
+            metrics,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+        write_audit_record(audit_record, contract_path)
 
     updated_contract = _apply_proposals(contract, payload, glossary)
     return ProposeResult(contract=updated_contract, metrics=metrics)

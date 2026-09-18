@@ -13,7 +13,9 @@ proposed at all.
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -216,6 +218,96 @@ def test_repropose_leaves_already_reviewed_columns_untouched():
     assert region_after.description.ai_proposed is False
     assert region_after.description.value == reviewed_region.description.value
     assert second_pass.metrics.input_tokens == 0  # no drafter call was made
+
+
+# ---- audit persistence (Rules & Constraints: "every AI proposal is auditable") --
+
+
+def test_propose_writes_an_audit_record_next_to_the_contract_when_given_a_path(tmp_path: Path):
+    """Given `contract_path`, `propose()` writes `<name>.audit.json` right next
+    to it, recording the model, a timestamp, and the column-level inputs sent
+    -- names and masked sample values, never a raw PII value."""
+    contract = _harvested_contract("workspace.analytics.customers", "BA-10231")
+    llm_client = build_llm_client(CUSTOMERS_FIXTURE)
+    contract_path = tmp_path / "customers.yaml"
+
+    result = propose(contract, FakeUCClient(), llm_client=llm_client, contract_path=contract_path)
+
+    audit_path = tmp_path / "customers.audit.json"
+    assert audit_path.exists()
+    audit = json.loads(audit_path.read_text())
+
+    assert audit["dataset_full_name"] == "workspace.analytics.customers"
+    assert audit["model"] == result.metrics.model
+    assert audit["input_tokens"] == result.metrics.input_tokens
+    assert audit["output_tokens"] == result.metrics.output_tokens
+    assert audit["generated_at"]  # a real timestamp was recorded
+    assert audit["system_prompt"]
+    assert audit["user_prompt"]
+
+    columns_by_name = {entry["column_name"]: entry for entry in audit["columns_proposed"]}
+    assert set(columns_by_name) == {column.name for column in contract.columns}
+
+    # Acceptance state is deliberately not recorded here -- see propose.py's
+    # module docstring for the design choice (read live from the contract
+    # instead of duplicating it here, where it could drift).
+    for entry in audit["columns_proposed"]:
+        assert "accepted" not in entry
+        assert "ai_proposed" not in entry
+
+
+def test_propose_audit_record_never_leaks_a_raw_value_for_a_pii_flagged_column(tmp_path: Path):
+    """Same masking discipline the request itself already proves
+    (`test_pii_looking_sample_values_are_masked_before_being_sent`), now
+    asserted against what actually landed on disk in the audit record."""
+    contract = _harvested_contract("workspace.analytics.customers", "BA-10231")
+    llm_client = build_llm_client(CUSTOMERS_FIXTURE)
+    contract_path = tmp_path / "customers.yaml"
+
+    propose(contract, FakeUCClient(), llm_client=llm_client, contract_path=contract_path)
+
+    audit = json.loads((tmp_path / "customers.audit.json").read_text())
+    columns_by_name = {entry["column_name"]: entry for entry in audit["columns_proposed"]}
+
+    for pii_column in ("email", "first_name", "last_name"):
+        entry = columns_by_name[pii_column]
+        assert entry["samples_masked"] is True
+        assert entry["masked_sample_values"]
+        assert all(value == "***MASKED***" for value in entry["masked_sample_values"])
+
+    assert "amara.diallo@example.com" not in audit["user_prompt"]
+    assert "Amara" not in audit["user_prompt"]
+    assert "Diallo" not in audit["user_prompt"]
+
+    # A non-sensitive column's real sample values are still recorded (this is
+    # an audit of what was sent, not a second layer of redaction).
+    region_entry = columns_by_name["region"]
+    assert region_entry["samples_masked"] is False
+    assert "EMEA" in region_entry["masked_sample_values"]
+
+
+def test_propose_writes_no_audit_record_when_nothing_needs_proposing(tmp_path: Path):
+    """No drafter call means nothing to audit -- `contract_path` is accepted
+    but no file is written, the same "no call was made" posture `metrics`
+    already takes for this case."""
+    contract = _harvested_contract("workspace.analytics.customers", "BA-10231")
+    first_pass = propose(contract, FakeUCClient(), llm_client=build_llm_client(CUSTOMERS_FIXTURE))
+    contract_path = tmp_path / "customers.yaml"
+
+    propose(first_pass.contract, FakeUCClient(), llm_client=build_llm_client(CUSTOMERS_FIXTURE), contract_path=contract_path)
+
+    assert not (tmp_path / "customers.audit.json").exists()
+
+
+def test_propose_does_not_write_an_audit_record_when_contract_path_is_omitted(tmp_path: Path):
+    """The default, unchanged behaviour every pre-existing call site in this
+    file relies on: omitting `contract_path` skips audit persistence entirely."""
+    contract = _harvested_contract("workspace.analytics.customers", "BA-10231")
+    llm_client = build_llm_client(CUSTOMERS_FIXTURE)
+
+    propose(contract, FakeUCClient(), llm_client=llm_client)
+
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.llm_live
