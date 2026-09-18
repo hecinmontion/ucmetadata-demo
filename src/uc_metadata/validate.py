@@ -52,7 +52,7 @@ from uc_metadata import harvest
 from uc_metadata.coverage import tier_is_supported_by_evidence
 from uc_metadata.dq_registry import evaluate_rules
 from uc_metadata.models import CertificationTier, Column, Contract
-from uc_metadata.uc_client import UCClient, UCColumn
+from uc_metadata.uc_client import UCClient, UCColumn, UCTableNotFoundError
 
 
 @dataclass(frozen=True)
@@ -130,9 +130,20 @@ def _drift_problems(contract: Contract, client: UCClient) -> List[str]:
     now, on name, data_type and nullable. Never mutates `contract` -- this is a
     read-only comparison, the same "detected, never auto-corrected" posture the
     spec's Glossary entry for Drift describes.
+
+    A table the catalogue no longer has at all (dropped, renamed, or a contract
+    authored before the table was actually provisioned) is itself the sharpest
+    possible drift, so `UCTableNotFoundError` from `client.get_table` is caught
+    here and turned into an ordinary named problem rather than left to propagate
+    -- this function's caller, `validate()`, promises a `ValidationResult`
+    verdict for every `Contract`, never an unhandled exception.
     """
     full_name = contract.dataset.qualifier.full_name
-    catalogue_columns = {column.name: column for column in client.get_table(full_name).columns}
+    try:
+        catalogue_table = client.get_table(full_name)
+    except UCTableNotFoundError:
+        return [f"catalogue: table {full_name!r} does not exist"]
+    catalogue_columns = {column.name: column for column in catalogue_table.columns}
     contract_columns = {column.name: column for column in contract.columns}
 
     problems: List[str] = []
