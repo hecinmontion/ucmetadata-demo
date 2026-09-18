@@ -21,15 +21,17 @@ from pathlib import Path
 
 import pytest
 
-from uc_metadata.fake_uc import FakeUCClient
+from uc_metadata.fake_uc import FakeUCClient, default_fixture_tables
 from uc_metadata.harvest import harvest
 from uc_metadata.models import CertificationTier, Column, Contract, Proposed, Refresh, Sensitivity
 from uc_metadata.uc_client import RealUCClient, UCClient
 from uc_metadata.validate import validate, validate_yaml
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 KNOWN_BA_ID = "BA-10231"
 TABLE = "workspace.analytics.customers"
+CAMPAIGNS_TABLE = "workspace.marketing.campaigns"
 UC_LIVE_TESTS_ENABLED = os.environ.get("UC_LIVE_TESTS") == "1"
 
 
@@ -179,6 +181,101 @@ def test_validate_names_added_removed_and_retyped_columns_on_drift():
     assert "'loyalty_tier'" in joined and "no longer exists in the catalogue" in joined
     assert "'email'" in joined and "has changed" in joined
     # Isolated: everything else about this contract is still fully reviewed.
+    assert _problems_with_prefix(result.problems, "unreviewed:") == []
+    assert _problems_with_prefix(result.problems, "placeholder:") == []
+
+
+# ---- certification vs. DQ evidence -----------------------------------------------
+
+
+def _client_with_an_untracked_table() -> FakeUCClient:
+    """A `FakeUCClient` carrying one extra table -- a copy of `customers`'s
+    columns and rows under a name `dq_registry.yaml` has no rule registered
+    against at all. None of the three real fixture tables can exercise the
+    "nothing attached" branch below (each already has at least one rule
+    registered), so a fourth table is needed; building it by mutating a fresh
+    copy of `default_fixture_tables()` is the pattern that function's own
+    docstring names as the supported way to extend the fixture set for a test.
+    """
+    tables = default_fixture_tables()
+    tables["workspace.analytics.customers_untracked"] = tables[TABLE]
+    return FakeUCClient(tables=tables)
+
+
+def test_validate_flags_a_silver_claim_with_no_dq_rules_attached_at_all():
+    client = _client_with_an_untracked_table()
+    contract = _fully_reviewed_contract(client, full_name="workspace.analytics.customers_untracked")
+
+    result = validate(contract, client)
+
+    assert result.ok is False
+    certification_problems = _problems_with_prefix(result.problems, "certification:")
+    assert len(certification_problems) == 1
+    assert "no DQ rules are attached" in certification_problems[0]
+    # Isolated: nothing else about this contract is wrong.
+    assert _problems_with_prefix(result.problems, "drift:") == []
+    assert _problems_with_prefix(result.problems, "unreviewed:") == []
+    assert _problems_with_prefix(result.problems, "placeholder:") == []
+
+
+def test_validate_flags_a_silver_claim_with_a_failing_attached_dq_rule():
+    """`workspace.marketing.campaigns`'s seeded fixture rows genuinely fail two
+    registered DQ rules (a negative budget on campaign 5003, an `end_date`
+    before `start_date` on campaign 5004) -- the same fixture data
+    `contracts/marketing/campaigns.yaml`'s adversarial demo is built against.
+    """
+    client = FakeUCClient()
+    contract = _fully_reviewed_contract(client, full_name=CAMPAIGNS_TABLE)
+
+    result = validate(contract, client)
+
+    assert result.ok is False
+    certification_problems = _problems_with_prefix(result.problems, "certification:")
+    assert len(certification_problems) == 1
+    assert "campaigns-budget-non-negative" in certification_problems[0]
+    assert "campaigns-end-date-not-before-start-date" in certification_problems[0]
+    # Isolated: nothing else about this contract is wrong.
+    assert _problems_with_prefix(result.problems, "drift:") == []
+    assert _problems_with_prefix(result.problems, "unreviewed:") == []
+    assert _problems_with_prefix(result.problems, "placeholder:") == []
+
+
+def test_validate_never_flags_bronze_certification_regardless_of_dq_evidence():
+    """Bronze makes no evidentiary claim (`tier_is_supported_by_evidence`'s own
+    contract) -- proven here against `campaigns`, whose attached rules are
+    genuinely failing, so this isolates "bronze is exempt" from "this table's
+    rules happen to pass"."""
+    client = FakeUCClient()
+    contract = _fully_reviewed_contract(client, full_name=CAMPAIGNS_TABLE)
+    bronze_dataset = contract.dataset.model_copy(update={"certification": CertificationTier.BRONZE})
+    contract = contract.model_copy(update={"dataset": bronze_dataset})
+
+    result = validate(contract, client)
+
+    assert _problems_with_prefix(result.problems, "certification:") == []
+
+
+def test_validate_flags_the_shipped_campaigns_contract_certification_evidence_mismatch():
+    """The real, shipped `contracts/marketing/campaigns.yaml` -- fully
+    reviewed, drift-free, and previously a clean `validate()` PASS before this
+    check was wired in. Its own header comment names `silver` as a deliberate
+    claim the DQ evidence does not support; this is that claim now being
+    caught for real, not a synthetic fixture standing in for it."""
+    client = FakeUCClient()
+    contract = Contract.from_yaml(REPO_ROOT / "contracts" / "marketing" / "campaigns.yaml")
+
+    result = validate(contract, client)
+
+    assert result.ok is False
+    certification_problems = _problems_with_prefix(result.problems, "certification:")
+    assert len(certification_problems) == 1
+    assert "silver" in certification_problems[0]
+    assert CAMPAIGNS_TABLE in certification_problems[0]
+    assert "campaigns-budget-non-negative" in certification_problems[0]
+    assert "campaigns-end-date-not-before-start-date" in certification_problems[0]
+    # Isolated: the certification check is the only reason this now fails --
+    # everything else about this shipped contract is still correct.
+    assert _problems_with_prefix(result.problems, "drift:") == []
     assert _problems_with_prefix(result.problems, "unreviewed:") == []
     assert _problems_with_prefix(result.problems, "placeholder:") == []
 

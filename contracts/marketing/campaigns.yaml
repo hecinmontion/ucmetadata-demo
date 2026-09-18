@@ -1,16 +1,24 @@
 # workspace.marketing.campaigns -- well-covered but quality-red (adversarial demo).
 # Hand-authored throughout by a human (every field below is ai_proposed: false;
 # no AI drafter was involved -- see README "What's mocked") and applied for real
-# against the live `ucmeta` workspace. Coverage is complete and this contract
-# passes validate() and apply(), but dq_registry.evaluate_rules(...) against
-# workspace.marketing.campaigns already fails two rules -- a negative budget
-# (campaign 5003) and an end_date before start_date (campaign 5004). The
-# underlying rows are left as-seeded on purpose: coverage measures fill, not
-# correctness, and this contract is the evidence for that distinction, not a
-# bug to fix. See dq_registry.yaml and apply.py's module docstring (the
-# certification-vs-evidence check is not wired into validate()/apply() yet,
-# which is why this contract's "silver" certification claim is accepted today
-# even though the DQ evidence for this table does not support it).
+# against the live `ucmeta` workspace. Coverage is complete -- no unreviewed
+# marker, no placeholder, no drift -- but dq_registry.evaluate_rules(...) against
+# workspace.marketing.campaigns fails two rules -- a negative budget (campaign
+# 5003) and an end_date before start_date (campaign 5004). The underlying rows
+# are left as-seeded on purpose: coverage measures fill, not correctness, and
+# this contract is the evidence for that distinction, not a bug to fix.
+#
+# `validate.py`'s certification-vs-evidence check is now wired in (it calls
+# dq_registry.evaluate_rules(...) and coverage.tier_is_supported_by_evidence(...)
+# -- see validate.py's module docstring), so `ucmeta validate` on this exact
+# file now correctly fails, naming this contract's "silver" claim as
+# unsupported by its own DQ evidence -- deliberately left failing rather than
+# "fixed" by lowering the tier or editing the rows, since the failure is the
+# demonstration: coverage said this dataset was fully described, and it was;
+# it never claimed the data underneath was correct, and this is what makes
+# that distinction real rather than only asserted. `apply()` refuses this
+# contract whole for the same reason (defence in depth: it calls validate()
+# itself before writing anything).
 version: 1
 dataset:
   qualifier:

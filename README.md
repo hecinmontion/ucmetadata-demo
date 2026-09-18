@@ -158,8 +158,10 @@ README — see ADR-004 and `scripts/seed_demo_data.sql`.
 
 Also worth opening, because they are the artifacts rather than the prose:
 `contracts/analytics/customers.yaml` (the happy path), `contracts/marketing/campaigns.yaml`
-(well-covered but quality-red), `contracts/analytics/orders.yaml` (grandfathered, still failing
-validation), `change_classes.yaml` (the two-track declaration) and `release_log.jsonl`.
+(well-covered but quality-red — fully reviewed, yet fails `validate()` because its `silver` claim
+outruns its own DQ evidence), `contracts/analytics/orders.yaml` (grandfathered, still failing
+validation for a different reason — genuinely pre-review), `change_classes.yaml` (the two-track
+declaration) and `release_log.jsonl`.
 
 ## What's mocked
 
@@ -173,8 +175,8 @@ free, touch it rather than imitating it.*
 | `uc_client.py` (`UCClient` protocol + `RealUCClient`) | **Real, against a real workspace** | Thin `databricks-sdk` translation: it translates, it does not decide (ADR-004). |
 | `fake_uc.py` | **Fake, test-only** | Not the product's target. Exists so tests are offline and deterministic, and so the seam has two implementations; a shared contract-test suite runs against both. |
 | `harvest.py` | **Real logic, real source** | Ran for real against the live workspace; the three shipped contracts were harvested from it. |
-| `propose.py` | **Real (real model, real calls)** | `claude-haiku-4-5`, structured output, masked samples, glossary-grounded term links. Recorded fixtures in CI. See the open gap below. |
-| `validate.py` | **Real** | Drift, unreviewed markers, placeholder sentinels. Certification-vs-evidence is deliberately *not* wired in yet — see gaps. |
+| `propose.py` | **Real (real model, real calls)** | `claude-haiku-4-5`, structured output, masked samples, glossary-grounded term links. Recorded fixtures in CI. Every real call writes a `<name>.audit.json` next to the contract (model, timestamp, both prompts, masked column-level inputs — never raw PII). See the open gap below. |
+| `validate.py` | **Real** | Drift, unreviewed markers, placeholder sentinels, and certification-vs-evidence (calls `dq_registry.evaluate_rules` + `coverage.tier_is_supported_by_evidence`). This is why `contracts/marketing/campaigns.yaml` now fails `validate()`/`apply()` — see below. |
 | `apply.py` | **Real, real target** | Table comment, column comments, tags, properties. Idempotency and revert-restores proven against live Unity Catalog. |
 | `release_log.py` | **Mock writer, real interface, really wired** | Every apply appends a record. The writer is a local `release_log.jsonl`; the production adapter swaps the writer, not the record's shape. |
 | `coverage.py` + `dashboard/app.py` | **Real, minimal** | Fill rate per dimension and team, computed not described. Rendered as a static generated page — no served app to fail live. |
@@ -206,20 +208,22 @@ AI-drafted proposal — `orders.state` is deliberately ambiguous (order status v
 abbreviation) and is the best candidate for demonstrating the drafter's low-confidence-flagging
 behaviour live. This is a real, unclosed loop, not a completed part of the build.
 
-Three further gaps in what was built, named here rather than discovered by a reader:
+Three further gaps were named here in an earlier phase and are now closed, worth recording rather
+than quietly deleting:
 
-- **The certification-vs-evidence check is not wired into `validate()`.** Both pieces it needs
-  exist and are tested (`dq_registry.evaluate_rules`, `coverage.tier_is_supported_by_evidence`),
-  and the call shape is documented at the integration point — but the check itself is not in the
-  gate. That is why `campaigns.yaml`'s `silver` claim is accepted today even though its quality
-  evidence does not support it.
-- **`tests/e2e/demo_scenario.py` was not built.** SC-001-01 is covered by unit tests against the
-  fake plus live runs done by hand; the planned single scenario file that runs both modes from one
-  source is not in the repository.
-- **No `CODEOWNERS` file ships.** Per-area code ownership is the design's answer to "who may
-  approve what" (including the second approver for sensitivity), and the `contracts/<area>/`
-  layout is what it would key on — but the file is a named placeholder, not a shipped artifact,
-  so that rule is carried by review convention here, not enforced.
+- **The certification-vs-evidence check is now wired into `validate()`.** It calls
+  `dq_registry.evaluate_rules` and `coverage.tier_is_supported_by_evidence`, exactly at the
+  integration point a prior phase documented ahead of time. The direct, intended consequence:
+  `contracts/marketing/campaigns.yaml`'s `silver` claim is no longer accepted — `validate()` and
+  `apply()` both now refuse it, naming the two failing DQ rules by id. That contract is left
+  failing on purpose (see its own header comment); coverage measuring fill and not correctness is
+  now a caught failure, not only an asserted one.
+- **`tests/e2e/demo_scenario.py` is now built.** One scenario file, two modes: the default runs
+  entirely against `FakeUCClient`; `--live` runs the same steps against the real Free Edition
+  workspace and doubles as confirmation that `workspace.analytics.customers`'s previously-applied
+  state is still correct. Runnable directly as a script or collectible under `pytest`.
+- **`CODEOWNERS` ships at the repository root.** Per-area review ownership, referenced by
+  ADR-003/005/006, keyed on the `contracts/<area>/` layout.
 
 ## Trade-offs
 
@@ -285,8 +289,8 @@ choices, marked as such.
 - **Bulk migration tooling for the existing estate.** No mass-backfill runner, no prioritisation
   engine. The migration argument is made in words, not in code.
 - **RBAC beyond a code-owners placeholder.** Who may edit and approve which contract is expressed
-  as per-area code ownership. Production would map that to identity groups; that mapping is not
-  built, and (see "What's mocked") the `CODEOWNERS` file itself is not shipped either.
+  as per-area code ownership (`CODEOWNERS`, shipped at the repository root). Production would map
+  that to identity groups; that mapping is not built.
 - **A discovery or search experience.** Nothing at all, not even a stub page. Discovery is the
   downstream consumer of good metadata, not this feature; a half-built discovery surface would cost
   walkthrough time and invite questions about a layer this prototype is not arguing about.
@@ -300,8 +304,9 @@ choices, marked as such.
   in a repository this platform does not own. That is a cross-team negotiation, not a build task.
   Drift detection is the standing answer meanwhile (ADR-007).
 - **A real data-quality engine.** Rules come from a small stand-in registry with a deliberately
-  tiny predicate grammar, evaluated over sampled rows. No rule scheduler, no scoring engine.
-  Related gap: the certification-vs-evidence check is ready to wire and not wired.
+  tiny predicate grammar, evaluated over sampled rows. No rule scheduler, no scoring engine. The
+  certification-vs-evidence check built on top of it is wired into `validate()`, not merely ready
+  to be.
 - **Business glossary curation.** The glossary is assumed to exist elsewhere and is represented by
   a dozen realistic sample terms used as drafter context.
 - **A real central release-log service.** Apply publishes through a real interface; the writer

@@ -3,11 +3,17 @@
 columns still undescribed").
 
 These tests confirm each shipped file is what it claims to be, not just that it
-parses: `customers.yaml` and `campaigns.yaml` are fully reviewed and pass
-`validate()`; `orders.yaml` is genuinely pre-review and `validate()` fails
-against it, naming the placeholder/unreviewed problems that prove it -- a
-polished file dressed up as unfinished would pass here by accident, which is
-exactly what this test guards against.
+parses: `customers.yaml` is fully reviewed and passes `validate()` outright;
+`campaigns.yaml` is equally fully reviewed (no unreviewed markers, no
+placeholders, no drift) but fails `validate()` for exactly one reason -- the
+certification-vs-evidence check, wired into `validate()` once
+`dq_registry.py`/`coverage.py` existed to support it, correctly catches its
+deliberate `silver` claim against two genuinely failing DQ rules (see
+`campaigns.yaml`'s own header comment). `orders.yaml` is genuinely pre-review
+and `validate()` fails against it for a different reason entirely, naming the
+placeholder/unreviewed problems that prove it -- a polished file dressed up as
+unfinished would pass here by accident, which is exactly what this test guards
+against.
 
 Also mechanically backs the honesty constraint this phase was built under: no
 shipped contract may contain `ai_proposed: true` anywhere, because no AI drafter
@@ -66,7 +72,7 @@ def test_orders_contract_parses_and_targets_the_right_table():
     assert contract.dataset.owner.business_application_id == "BA-30587"
 
 
-# ---- validate(): the happy-path contracts pass -----------------------------------
+# ---- validate(): the happy-path contract passes outright -------------------------
 
 
 @pytest.mark.scenario("SC-001-01")
@@ -79,17 +85,27 @@ def test_customers_contract_passes_validate():
     assert result.ok, result.problems
 
 
-def test_campaigns_contract_passes_validate():
+# ---- validate(): the adversarial demo contract fails, for exactly one reason -----
+
+
+def test_campaigns_contract_fails_validate_solely_on_certification_evidence():
     """`campaigns.yaml` is the well-covered-but-quality-red adversarial demo:
-    it passes validate() (metadata coverage/review is complete) even though
-    its DQ rules fail -- coverage measures fill, not correctness, and that gap
-    is proven in `tests/unit/test_dq_registry.py`, not re-proven here."""
+    metadata coverage and review are complete (no drift, no unreviewed marker,
+    no placeholder), but its `silver` claim is not backed by its DQ evidence --
+    two attached rules genuinely fail against its seeded rows (a negative
+    budget, an `end_date` before `start_date`). `validate()`'s
+    certification-vs-evidence check catches exactly that, and nothing else
+    about this contract is wrong -- the DQ failures themselves are proven in
+    `tests/unit/test_dq_registry.py`, not re-proven here."""
     client = FakeUCClient()
     contract = Contract.from_yaml(CAMPAIGNS_PATH)
 
     result = validate(contract, client)
 
-    assert result.ok, result.problems
+    assert result.ok is False
+    assert len(result.problems) == 1
+    assert result.problems[0].startswith("certification:")
+    assert "silver" in result.problems[0]
 
 
 # ---- validate(): the grandfathered contract genuinely fails ---------------------

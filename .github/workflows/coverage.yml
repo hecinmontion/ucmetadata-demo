@@ -9,11 +9,13 @@
 # at all, fake or real, to compute correctly. (This is a stronger case for
 # no-credentials-needed than validate.yml/apply.yml make, not the same
 # workaround repeated a third time.) Honest gap, same as the other two
-# workflows: a production deployment's DQ-*evidence certification* checks
-# (validate.py's not-yet-wired certification-vs-evidence check, per
-# apply.py's docstring) would need `--live` and a real service-principal
-# credential to certify against live quality-check results, not just contract
-# content -- named here rather than glossed over.
+# workflows: `validate.py`'s certification-vs-evidence check (dq_registry.py /
+# coverage.py's `tier_is_supported_by_evidence`) is real and wired in, but this
+# workflow evaluates it against `FakeUCClient`'s static fixture rows, not
+# against a live table's current data -- a production deployment would need
+# `--live` and a real service-principal credential to certify tier claims
+# against genuinely current quality-check results, not just contract content
+# and a fixture snapshot -- named here rather than glossed over.
 name: coverage
 
 on:

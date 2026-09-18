@@ -23,16 +23,19 @@ collects every failure from all of them, rather than stopping at the first:
   docstring for why the unreviewed-marker check cannot catch this by construction,
   not just by omission.
 - *Certification-vs-evidence* (Rules & Constraints: "a tier claim that the quality
-  and coverage evidence does not support fails validation") is deliberately NOT
-  built here. `dq_registry.py`/`coverage.py` (a later phase) now exist and expose
-  exactly the pieces this check needs: `dq_registry.evaluate_rules(full_name,
-  client)` and the pure function `coverage.tier_is_supported_by_evidence(contract,
-  dq_results)`. Wiring them in -- a new problem-collecting helper here, added to
-  `validate()`'s check list, plus its own test -- is left as a documented,
-  ready-to-wire integration point rather than done in that phase, since it is more
-  than the one-line addition that would justify doing it opportunistically; see
-  `coverage.py`'s "integration point for validate.py" note for the exact call
-  shape.
+  and coverage evidence does not support fails validation") wires together
+  `dq_registry.evaluate_rules(full_name, client)` and the pure function
+  `coverage.tier_is_supported_by_evidence(contract, dq_results)` -- see
+  `coverage.py`'s "integration point for validate.py" note, which named this exact
+  call shape ahead of time. `bronze` makes no evidentiary claim and is never
+  flagged (`tier_is_supported_by_evidence`'s own docstring); `silver`/`gold` fails
+  this check if no DQ rule is attached at all, or if any attached rule is failing.
+  One direct, intended consequence: `contracts/marketing/campaigns.yaml` ships
+  with `certification: silver` and two attached DQ rules genuinely failing (a
+  negative budget, an `end_date` before `start_date`) -- that contract's own
+  header comment names this as deliberate, the adversarial case coverage's fill-vs-
+  correctness distinction depends on, and this check is what makes the distinction
+  real rather than only documented.
 
 What this module deliberately does not do: it does not print the exact catalogue
 writes a merge would perform (that is `apply.py`'s planning/dry-run function, a
@@ -46,7 +49,9 @@ from pathlib import Path
 from typing import List, Union
 
 from uc_metadata import harvest
-from uc_metadata.models import Column, Contract
+from uc_metadata.coverage import tier_is_supported_by_evidence
+from uc_metadata.dq_registry import evaluate_rules
+from uc_metadata.models import CertificationTier, Column, Contract
 from uc_metadata.uc_client import UCClient, UCColumn
 
 
@@ -93,6 +98,7 @@ def validate(contract: Contract, client: UCClient) -> ValidationResult:
     problems.extend(_drift_problems(contract, client))
     problems.extend(_unreviewed_field_problems(contract))
     problems.extend(_placeholder_sentinel_problems(contract))
+    problems.extend(_certification_evidence_problems(contract, client))
     return ValidationResult(ok=not problems, problems=problems)
 
 
@@ -218,3 +224,44 @@ def _placeholder_sentinel_problems(contract: Contract) -> List[str]:
             "has not been declared by a human"
         )
     return problems
+
+
+# ---- certification vs. DQ evidence (Rules & Constraints: "a tier claim that the
+# quality and coverage evidence does not support fails validation") -------------
+
+
+def _certification_evidence_problems(contract: Contract, client: UCClient) -> List[str]:
+    """One problem if `contract.dataset.certification` is a `silver`/`gold` claim
+    the attached DQ evidence does not support -- named by exactly which rules are
+    failing, or that none are attached at all, rather than a generic refusal.
+
+    Delegates the actual verdict to `coverage.tier_is_supported_by_evidence`, the
+    pure function `coverage.py`'s own "integration point for validate.py" note
+    named ahead of time; this function's only job is running
+    `dq_registry.evaluate_rules` to get that function its `dq_results` argument,
+    and turning a `False` verdict into a problem string with the two shapes a
+    reviewer needs to distinguish -- "nothing attached" vs. "something attached
+    and failing". `bronze` makes no evidentiary claim and is never flagged
+    (`tier_is_supported_by_evidence`'s own docstring; also `_placeholder_sentinel_
+    problems`' job, not this one's, if `bronze` is itself still a placeholder).
+    """
+    if contract.dataset.certification == CertificationTier.BRONZE:
+        return []
+
+    full_name = contract.dataset.qualifier.full_name
+    dq_results = evaluate_rules(full_name, client)
+    if tier_is_supported_by_evidence(contract, dq_results):
+        return []
+
+    tier = contract.dataset.certification.value
+    if not dq_results:
+        return [
+            f"certification: {tier!r} claimed for {full_name!r} but no DQ rules are attached to it -- "
+            "attach passing evidence or lower the certification claim"
+        ]
+    failing_rule_ids = [result.rule_id for result in dq_results if not result.passed]
+    return [
+        f"certification: {tier!r} claimed for {full_name!r} but {len(failing_rule_ids)} attached DQ "
+        f"rule(s) are failing ({', '.join(failing_rule_ids)}) -- the quality evidence does not support "
+        "this tier"
+    ]

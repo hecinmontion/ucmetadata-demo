@@ -66,14 +66,14 @@ A caller that wants "did this fully apply" has exactly one field to check
 `writes_succeeded`/`writes_failed` naming precisely which write labels are in
 which state, never an opaque "apply failed" exception swallowing that detail.
 
-What this module does not yet do: `validate.py`'s certification-vs-evidence
-check is not wired in (`dq_registry.py`/`coverage.py` now exist and expose the
-pieces it needs -- see `coverage.py`'s "integration point for validate.py"
-note -- but `validate.py` does not call them yet), so neither `validate()` nor
-`apply()` can refuse a tier claim the quality evidence does not support yet.
-Once that check is wired into `validate.py`, `apply()` needs no change to pick
-it up -- it already refuses on any `validate()` failure, not on a
-hand-maintained list of which checks count.
+`validate.py`'s certification-vs-evidence check is wired in (`dq_registry.py`/
+`coverage.py`'s pieces, called from `validate()` -- see `coverage.py`'s
+"integration point for validate.py" note), and `apply()` needed no change to
+pick it up: it already refuses on any `validate()` failure, not on a
+hand-maintained list of which checks count. This is why `apply()` also refuses
+`contracts/marketing/campaigns.yaml` whole -- its `silver` claim is not backed
+by its own DQ evidence (see that file's header comment) -- even though every
+other check on it passes.
 """
 
 from __future__ import annotations
