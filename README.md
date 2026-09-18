@@ -18,6 +18,7 @@ Design decisions live in [`docs/`](docs/) as ADRs:
 | [ADR-005](docs/ADR-005-central-contract-repository.md) | One central contract repository, split later if volume proves it |
 | [ADR-006](docs/ADR-006-two-tracks-for-change.md) | Two tracks for change: content edits vs. schema/tooling changes |
 | [ADR-007](docs/ADR-007-gate-provisioning-and-grants.md) | Gate provisioning and grants, not schema changes (the forcing function) |
+| [ADR-008](docs/ADR-008-coverage-history-and-native-dashboard.md) | Coverage history as a Unity Catalog table, with a native AI/BI dashboard over it |
 
 ## Problem
 
@@ -179,7 +180,7 @@ free, touch it rather than imitating it.*
 | `validate.py` | **Real** | Drift, unreviewed markers, placeholder sentinels, and certification-vs-evidence (calls `dq_registry.evaluate_rules` + `coverage.tier_is_supported_by_evidence`). This is why `contracts/marketing/campaigns.yaml` now fails `validate()`/`apply()` — see below. |
 | `apply.py` | **Real, real target** | Table comment, column comments, tags, properties. Idempotency and revert-restores proven against live Unity Catalog. |
 | `release_log.py` | **Mock writer, real interface, really wired** | Every apply appends a record. The writer is a local `release_log.jsonl`; the production adapter swaps the writer, not the record's shape. |
-| `coverage.py` + `dashboard/app.py` | **Real, minimal** | Fill rate per dimension and team, computed not described. Rendered as a static generated page — no served app to fail live. |
+| `coverage.py` + `dashboard/app.py` | **Real, minimal** | Fill rate per dimension and team, computed not described. Rendered as a static generated page — no served app to fail live. Today's report is point-in-time and overwritten on each run; making the metric durable (an append-only Unity Catalog history table with a native AI/BI dashboard over it) is a recorded decision, **ADR-008**, not yet built. |
 | Outcome measure | **Simulated, labelled** | Computed from `sample_outcome_events.yaml`; every measure carries `simulated=True` and a caveat naming the fixture, so no caller can present it as observed. |
 | `owner_registry.py` | **Mock behind a seam** | `resolve_owner(ba_id) -> Owner` over four hard-coded entries. Contracts store only the business-application id pointer, never a copied owner string. |
 | `glossary/terms.yaml` + `glossary.py` | **Mock data, real grounding** | Twelve sample terms, loaded and passed to the drafter as context; a proposed term link is dropped unless it resolves to a real entry. At this size the whole glossary fits in the prompt, so there is no retrieval ranking to speak of — that would be the next step at real glossary scale. |
