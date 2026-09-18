@@ -296,58 +296,51 @@ columns: []
 # ---- the Pydantic-vs-JSON-Schema parity gap: unknown/misspelled fields ---------------
 
 
-def test_pydantic_silently_accepts_an_unknown_top_level_field_the_json_schema_rejects(tmp_path: Path):
-    """`models.py`'s own docstring: "Pydantic wins here" -- `Contract.from_yaml`
-    is the one validator actually enforced at runtime; `validate_against_json_schema`
-    is a secondary, not-auto-invoked check kept "so the two haven't drifted
-    apart" (per the module docstring and `test_valid_contract_fixture_also_
-    satisfies_the_json_schema`).
+def test_pydantic_rejects_an_unknown_top_level_field_the_json_schema_also_rejects(tmp_path: Path):
+    """Fixed: `models.py`'s own docstring: "Pydantic wins here" --
+    `Contract.from_yaml` is the one validator actually enforced at runtime;
+    `validate_against_json_schema` is a secondary, not-auto-invoked check kept
+    "so the two haven't drifted apart" (per the module docstring and
+    `test_valid_contract_fixture_also_satisfies_the_json_schema`).
 
-    They *have* drifted apart, on exactly the dimension that matters most for
-    a hand-edited authoring surface: `contract.schema.json` declares
-    `additionalProperties: false` at every level; `Contract`/`Dataset`/`Column`
-    set no `model_config = {"extra": "forbid"}` anywhere, so Pydantic's
-    default (`extra="ignore"`) silently drops anything it does not recognise.
-
-    A producer who mistypes a top-level key gets zero signal from the one
-    validator that is actually enforced -- `Contract.from_yaml` builds a
-    contract that (silently) does not contain what the producer thinks it
-    does, and every later stage (validate.py, apply.py) trusts it as already
-    well-formed.
+    They used to drift apart on exactly the dimension that matters most for a
+    hand-edited authoring surface: `contract.schema.json` declares
+    `additionalProperties: false` at every level, but no model set
+    `model_config = {"extra": "forbid"}`, so Pydantic's default
+    (`extra="ignore"`) silently dropped anything it did not recognise. Every
+    model now sets `extra="forbid"`, so a producer who mistypes a top-level
+    key gets a loud `pydantic.ValidationError` from the one validator that is
+    actually enforced, matching what the secondary JSON Schema already caught.
     """
     raw = yaml.safe_load((FIXTURES_DIR / "valid_contract.yaml").read_text())
     raw["dataset_typo_should_have_been_dataset_extra"] = {"whoops": True}
 
-    # Pydantic: no complaint at all.
-    contract = Contract.model_validate(raw)
-    assert contract.dataset.qualifier.full_name == "workspace.sales.orders"
+    # Pydantic: now rejects it too, parity restored with the JSON Schema.
+    with pytest.raises(ValidationError):
+        Contract.model_validate(raw)
 
-    # The secondary, language-agnostic schema: correctly rejects the same input.
+    # The secondary, language-agnostic schema: also rejects the same input.
     import jsonschema
 
     with pytest.raises(jsonschema.exceptions.ValidationError):
         validate_against_json_schema(raw)
 
 
-def test_pydantic_silently_drops_a_misspelled_judgment_field_on_a_column(tmp_path: Path):
-    """The sharper version of the same gap: a producer meaning to review a
-    column's `pii` flag but typing `piii` (a single-letter typo) gets a
-    contract that Pydantic considers perfectly valid, with the real `pii`
-    field left at its default `None` -- indistinguishable from "not yet
-    proposed". `validate.py`'s checks never see this: `pii=None` is not an
-    unreviewed marker (there is no `Proposed` value to walk) and it is not one
-    of the four dataset-level placeholder sentinels either, so this contract
-    can sail all the way to `apply()` with a sensitive-data flag the author
-    believed they set, silently absent.
+def test_pydantic_rejects_a_misspelled_judgment_field_on_a_column(tmp_path: Path):
+    """Fixed: the sharper version of the same gap. A producer meaning to
+    review a column's `pii` flag but typing `piii` (a single-letter typo)
+    used to get a contract Pydantic considered perfectly valid, with the real
+    `pii` field silently left at its default `None` -- indistinguishable from
+    "not yet proposed", and invisible to every later stage (`validate.py`,
+    `apply.py`). With `extra="forbid"` on `Column`, the same typo is now
+    rejected outright at load time, before it can silently carry a
+    sensitive-data flag the author believed they set.
     """
     raw = yaml.safe_load((FIXTURES_DIR / "valid_contract.yaml").read_text())
     raw["columns"][1]["piii"] = raw["columns"][1].pop("pii")  # typo'd key, real content moved with it
 
-    contract = Contract.model_validate(raw)
-    customer_email = contract.columns[1]
-    assert customer_email.name == "customer_email"
-    assert customer_email.pii is None  # the real pii flag was never set
-    assert contract.has_unreviewed_fields is False  # and nothing flags this as a problem
+    with pytest.raises(ValidationError):
+        Contract.model_validate(raw)
 
     import jsonschema
 

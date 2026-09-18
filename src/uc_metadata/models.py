@@ -17,6 +17,12 @@ the two haven't drifted apart. It is deliberately *not* invoked automatically in
 every load, with no clear answer to "which one wins" when they disagree. Pydantic
 wins here; call `validate_against_json_schema` explicitly if you need the second,
 language-agnostic check (e.g. to validate a YAML file with no Python runtime at all).
+Every model below sets `model_config = {"extra": "forbid"}` so an unknown or
+misspelled field (e.g. a typo'd `pii`) is rejected by the one validator actually
+enforced at runtime, matching the `additionalProperties: false` posture
+`contract.schema.json` already declares at every level -- closing a parity gap the
+two validators previously had (Pydantic's own default, `extra="ignore"`, silently
+dropped anything it did not recognise).
 
 The AI-proposed / unreviewed marker (Glossary) is the load-bearing design decision in
 this module: every judgment field the AI drafter may fill in is wrapped in
@@ -87,6 +93,8 @@ class Proposed(BaseModel, Generic[T]):
     ownership of it" (Glossary: Review) means in this codebase.
     """
 
+    model_config = {"extra": "forbid"}
+
     value: T
     ai_proposed: bool = True
     note: Optional[str] = Field(
@@ -116,7 +124,7 @@ class Qualifier(BaseModel):
     schema_name: str = Field(min_length=1, alias="schema")
     table: str = Field(min_length=1)
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "forbid"}
 
     @property
     def full_name(self) -> str:
@@ -133,6 +141,8 @@ class OwnerPointer(BaseModel):
 
     business_application_id: str = Field(min_length=1)
 
+    model_config = {"extra": "forbid"}
+
 
 class Refresh(BaseModel):
     """A human-declared refresh commitment. Declared, never measured (Out of Scope)."""
@@ -140,9 +150,13 @@ class Refresh(BaseModel):
     cadence: str = Field(min_length=1, description="e.g. 'hourly', 'daily', 'weekly'")
     sla_minutes: int = Field(gt=0, description="Minutes past the cadence boundary before it's a breach")
 
+    model_config = {"extra": "forbid"}
+
 
 class Dataset(BaseModel):
     """The dataset-level half of a contract."""
+
+    model_config = {"extra": "forbid"}
 
     qualifier: Qualifier
     owner: OwnerPointer
@@ -168,6 +182,8 @@ class Column(BaseModel):
     harvested skeleton ("left blank", per Behaviour), populated by `propose.py` as
     `Proposed` values, and reviewed by a human before merge.
     """
+
+    model_config = {"extra": "forbid"}
 
     name: str = Field(min_length=1)
     data_type: str = Field(min_length=1)
@@ -222,6 +238,8 @@ class Contract(BaseModel):
     full Pydantic validation — every required field present, every enum value legal,
     every `version` one this module declares support for.
     """
+
+    model_config = {"extra": "forbid"}
 
     version: int = Field(
         default=CONTRACT_SCHEMA_VERSION,
