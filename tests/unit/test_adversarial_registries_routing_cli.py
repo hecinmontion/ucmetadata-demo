@@ -33,7 +33,7 @@ from uc_metadata.fake_uc import FakeUCClient
 from uc_metadata.harvest import harvest
 from uc_metadata.models import CertificationTier, Proposed, Refresh, Sensitivity
 from uc_metadata.owner_registry import UnknownBusinessApplicationError, resolve_owner
-from uc_metadata.release_log import read_release_log
+from uc_metadata.release_log import DeploymentStatus, read_release_log
 from uc_metadata.uc_client import UCTableNotFoundError
 
 TABLE = "workspace.analytics.customers"
@@ -168,36 +168,28 @@ def test_predicate_interpreter_raises_a_named_error_for_an_unsupported_clause():
         _predicate_holds("some_col LIKE '%x%'", {"some_col": "x"})
 
 
-def test_predicate_interpreter_silently_misparses_an_or_joined_predicate_instead_of_rejecting_it():
-    """Real finding, softer than the others in this file: the grammar is
-    documented as `AND`-only ("no OR, no parentheses ... a bigger grammar is
-    exactly the 'invent a rule execution engine from scratch' Out of Scope
-    already declines to build"), which reads as a deliberate limitation a
-    rule author should get a clear error against if they hit it. They don't.
+def test_predicate_interpreter_rejects_an_or_joined_predicate_instead_of_misparsing_it():
+    """Fixed: the grammar is documented as `AND`-only ("no OR, no parentheses
+    ... a bigger grammar is exactly the 'invent a rule execution engine from
+    scratch' Out of Scope already declines to build"), which reads as a
+    deliberate limitation a rule author should get a clear error against if
+    they hit it. `_COMPARISON_RE`'s right-hand-side group used to be `.+`
+    (greedy, matches everything to end of line), so `"a > 0 OR b > 0"` (no
+    `AND` at all, handed whole to the comparison regex) resolved `rhs` to the
+    literal string `"0 OR b > 0"` -- not rejected as malformed, just silently
+    "no such column" -> `None` -> "does not hold" for every row.
 
-    `_predicate_holds` only splits on `\\bAND\\b`; a clause with no `AND` at
-    all is handed whole to `_COMPARISON_RE`, whose right-hand-side group is
-    `.+` (greedy, matches everything to end of line). For `"a > 0 OR b > 0"`
-    this makes `rhs` the literal 10-character string `"0 OR b > 0"` -- not
-    rejected as malformed, just resolved as "not a quoted literal, not
-    numeric, and no such column in the row" -> `None`, which
-    `_clause_holds`'s own NULL-operand simplification then turns into "does
-    not hold" for *every* row, silently. A DQ rule author who writes `OR`
-    thinking it is supported (a reasonable assumption from `AND` being
-    supported) gets a rule that always fails with a violation count equal to
-    every row, and no error message anywhere pointing at `OR` as the actual
-    problem -- exactly the class of failure `_predicate_holds`'s own
-    docstring says it exists to avoid ("raises... rather than silently
-    treating an unsupported predicate as always-true"); it does not raise
-    here, and it is not "always-true", but "always-false-with-no-diagnostic"
-    is not meaningfully safer for someone debugging a certification tier
-    that mysteriously never earns its evidence.
+    The right-hand-side group is now restricted to exactly the grammar the
+    module docstring already describes (a quoted literal, a number, or a bare
+    column reference) and nothing else, so a trailing ` OR b > 0` can no
+    longer be silently absorbed into it: the whole clause now matches none of
+    the three supported shapes and `_clause_holds` raises its own documented
+    "unsupported predicate clause" error, naming the clause verbatim.
     """
     row = {"a": "1", "b": "1"}  # would satisfy `a > 0 OR b > 0` under real OR semantics
 
-    holds = _predicate_holds("a > 0 OR b > 0", row)
-
-    assert holds is False  # no exception, no diagnostic -- just silently "does not hold"
+    with pytest.raises(ValueError, match="unsupported predicate clause"):
+        _predicate_holds("a > 0 OR b > 0", row)
 
 
 def test_predicate_interpreter_treats_a_null_operand_as_a_violation_not_a_crash():
@@ -378,32 +370,40 @@ class _RaisesKeyboardInterruptOnSecondColumn(FakeUCClient):
         return super().set_column_comment(full_name, column_name, comment, dry_run=dry_run)
 
 
-def test_keyboard_interrupt_mid_apply_leaves_writes_landed_but_publishes_no_release_record(tmp_path: Path):
-    """Confirms the interrupt is *worse* than the documented partial-failure
-    path, not merely different: a write that raises an ordinary `Exception`
-    mid-loop still gets `apply()` all the way to `publish_release_record`
-    with a `PARTIAL_FAILURE` record naming exactly what landed
+def test_keyboard_interrupt_mid_apply_leaves_writes_landed_but_publishes_a_partial_failure_record(
+    tmp_path: Path,
+):
+    """Fixed: `apply.py`'s "Interrupted mid-apply" policy (module docstring)
+    wraps the write loop so a `BaseException` (e.g. `KeyboardInterrupt`)
+    escaping mid-loop -- not an ordinary write failure, which the loop's own
+    `except Exception` already handles -- still gets whatever succeeded/failed
+    so far published as a `partial_failure` record before the exception
+    re-propagates unchanged. The interrupt itself is never swallowed (the
+    caller still sees it), but the audit trail for what already landed no
+    longer disappears with it.
+
+    This test used to encode the gap this policy closes: an interrupt at this
+    exact point in the loop lost the release record entirely, worse than the
+    documented ordinary-partial-failure path
     (`test_apply_names_several_simultaneous_write_failures_precisely`,
-    `test_apply.py`'s own `_FailOnColumnComment` test). A `KeyboardInterrupt`
-    at the same point in the same loop gets none of that: whatever writes
-    already landed (here: the table comment and the first column's comment)
-    stay applied with no rollback, exactly one column's write is genuinely
-    mid-flight/unknown, and *zero* release records are published for an
-    apply attempt that demonstrably mutated the catalogue -- the same
-    "exactly one ReleaseRecord ... never silently skipped" postcondition
-    violation `test_adversarial_validate_apply.py`'s disk-full test found,
-    reached here through the write loop's exception handling instead of
-    through `publish_release_record` itself.
+    `test_apply.py`'s own `_FailOnColumnComment` test) which always publishes
+    one. It now proves the interrupted path is no longer worse: exactly one
+    record, correctly marked `partial_failure`, naming exactly what landed.
     """
     client = _RaisesKeyboardInterruptOnSecondColumn()
     contract = _fully_reviewed_contract(client)
     log_path = tmp_path / "release_log.jsonl"
 
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(KeyboardInterrupt):  # the interrupt itself still propagates -- never swallowed
         apply(contract, client, approved_by=APPROVER, log_path=log_path)
 
     # The table comment (the first write) already landed.
     assert client.get_table(TABLE).comment == contract.dataset.description
-    # ...but there is no release record at all for this apply attempt --
-    # worse than the named PARTIAL_FAILURE case, which always gets one.
-    assert read_release_log(log_path) == []
+
+    # ...and, unlike the un-fixed behaviour, exactly one release record was
+    # still published for this interrupted attempt.
+    records = read_release_log(log_path)
+    assert len(records) == 1
+    record = records[0]
+    assert record.deployment_status == DeploymentStatus.PARTIAL_FAILURE
+    assert "table comment" in record.writes_succeeded

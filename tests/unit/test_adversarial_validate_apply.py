@@ -298,36 +298,22 @@ def test_apply_names_several_simultaneous_write_failures_precisely(tmp_path: Pat
 
 
 def test_release_log_write_failure_leaves_a_mutated_catalogue_with_no_audit_trail(tmp_path: Path, monkeypatch):
-    """`apply.py`'s own module docstring states this postcondition in so many
-    words: "Postcondition, on every call: exactly one ReleaseRecord is
-    published (success, partial failure, failure, or refusal -- never
-    silently skipped) and the returned ApplyResult.status matches it."
+    """Fixed: `apply.py`'s "Release-log write failure" policy (module
+    docstring) is that a `publish_release_record` failure -- a real
+    possibility for a local append-only file: a read-only filesystem, a
+    disk-full condition, a path an unprivileged process cannot create -- never
+    escapes as a raw exception. `apply()` catches it and returns the same
+    `ApplyResult` it would have returned on a clean publish (`status`,
+    `writes_succeeded`, `writes_failed` all still accurately describe what
+    happened to the catalogue), with `release_log_error` naming this attempt
+    as needing manual audit reconstruction, plus the underlying error.
 
-    `apply()` calls `publish_release_record(record, log_path=log_path)`
-    directly, with no `try`/`except`, *after* every write in the loop has
-    already been attempted against the real catalogue. If that call raises
-    (a real possibility for a local append-only file: a read-only
-    filesystem, a disk-full condition, a path an unprivileged process cannot
-    create), the exception propagates straight out of `apply()`:
-
-      - the catalogue writes that already succeeded stay applied -- there is
-        no rollback, which is `apply.py`'s own documented, honest policy for
-        *write* failures, but is not documented anywhere as the policy for a
-        release-log failure specifically;
-      - no `ReleaseRecord` is published, directly contradicting the stated
-        postcondition ("never silently skipped");
-      - the caller receives a raw `OSError` (or whatever the writer raises)
-        instead of an `ApplyResult`, losing the structured
-        `writes_succeeded`/`writes_failed` detail entirely -- there is no way
-        for the caller to learn, from what `apply()` gives it, which writes
-        already landed.
-
-    This is the single highest-severity finding in this pass: a successful
-    (or partially successful) production catalogue mutation with a
-    provably-guaranteed-empty audit trail, on a platform whose entire
-    Non-functional Requirements "Regulatory" section rests on being able to
-    answer "who changed this, when, and on whose approval" as ordinary
-    engineering hygiene.
+    This test used to encode the gap this policy closes: a caller getting a
+    raw `OSError` instead of an `ApplyResult`, losing the structured
+    `writes_succeeded`/`writes_failed` detail entirely. It now proves the
+    fix: the caller still gets that detail, still learns the catalogue
+    mutation landed, and is explicitly told the release log does not have a
+    record of it.
     """
     import uc_metadata.apply as apply_module
 
@@ -342,15 +328,23 @@ def test_release_log_write_failure_leaves_a_mutated_catalogue_with_no_audit_trai
     before = client.get_table(TABLE)
     assert before.comment != contract.dataset.description  # not yet applied
 
-    with pytest.raises(OSError):
-        apply(contract, client, approved_by=APPROVER, log_path=log_path)
+    result = apply(contract, client, approved_by=APPROVER, log_path=log_path)  # must not raise
 
     # The catalogue write already landed -- apply()'s partial-failure policy
     # for writes did its job of not rolling back.
     after = client.get_table(TABLE)
     assert after.comment == contract.dataset.description
 
-    # ...but the release log has *nothing* for this attempt: the stated
-    # "never silently skipped" postcondition does not hold once
-    # publish_release_record itself can fail.
+    # The ApplyResult still accurately reports the catalogue outcome...
+    assert result.status == DeploymentStatus.SUCCESS
+    assert result.writes_succeeded  # the structured detail was not lost
+
+    # ...and names the release-log failure explicitly, rather than hiding it.
+    assert result.release_log_error is not None
+    assert "MANUAL AUDIT ACTION REQUIRED" in result.release_log_error
+    assert "simulated: release log write failed" in result.release_log_error
+
+    # The release log genuinely has nothing for this attempt -- that is the
+    # one thing this policy cannot fix from inside apply() itself, which is
+    # exactly why release_log_error exists: to make the gap loud, not silent.
     assert read_release_log(log_path) == []

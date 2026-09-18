@@ -74,6 +74,37 @@ hand-maintained list of which checks count. This is why `apply()` also refuses
 `contracts/marketing/campaigns.yaml` whole -- its `silver` claim is not backed
 by its own DQ evidence (see that file's header comment) -- even though every
 other check on it passes.
+
+Release-log write failure -- policy decision -- `publish_release_record` runs
+*after* every catalogue write has already been attempted, and it can itself
+fail (a read-only filesystem, a disk-full condition, a path an unprivileged
+process cannot create). Letting that exception propagate uncaught would leave
+a mutated catalogue with a provably empty audit trail, which is a sharper
+violation of "never silently skipped" than any write failure this module
+already handles gracefully. The chosen policy: `apply()` never lets a
+release-log write failure escape as a raw exception. It catches the failure
+and returns the same `ApplyResult` it would have returned on success --
+`status`, `writes_succeeded` and `writes_failed` all still describe exactly
+what happened to the catalogue -- with `release_log_error` set to a message
+naming this as a manual audit action required, plus the underlying error. A
+caller that only checks `ApplyResult.status`/`.ok` still gets an accurate
+verdict about the catalogue; a caller (or an operator paging through logs)
+that also checks `release_log_error` learns the one thing this module cannot
+fix on its own: the audit trail for this specific attempt needs a human to
+reconstruct or re-publish it out of band. No retry is attempted here -- a
+second write to the same unwritable path is unlikely to succeed, and a
+silent retry loop would just delay surfacing the same signal.
+
+Interrupted mid-apply (`BaseException`, e.g. `KeyboardInterrupt`/`SystemExit`)
+-- the write loop only catches `Exception`, deliberately, so an operator's
+Ctrl-C is never mistaken for an ordinary write failure and is never swallowed.
+But an interrupt escaping the loop mid-sequence must not also skip the release
+record the way an ordinary partial failure never does: whatever writes
+succeeded or failed before the interrupt landed is still published, as a
+`partial_failure` record (the apply is, by definition, incomplete), before the
+`BaseException` is re-raised unchanged. The interrupt itself is never caught
+or hidden -- only the audit trail for what already happened is preserved on
+the way out.
 """
 
 from __future__ import annotations
@@ -120,12 +151,22 @@ class ApplyResult:
     `problems` is `validate()`'s problem list, non-empty only when `status` is
     `refused`. `writes_succeeded`/`writes_failed` are the full `WriteAttempt`
     record for every write this call attempted, in attempted order.
+
+    `release_log_error` is `None` on the ordinary path -- the release record
+    published cleanly. It is set to a human-readable "MANUAL AUDIT ACTION
+    REQUIRED" message, naming the underlying error, on the one path where
+    `publish_release_record` itself failed (see module docstring's
+    "Release-log write failure" policy): `status`/`writes_succeeded`/
+    `writes_failed` still accurately describe what happened to the catalogue,
+    but no `ReleaseRecord` for this attempt made it into the log, and a human
+    needs to know that to reconstruct the audit trail.
     """
 
     status: DeploymentStatus
     problems: List[str] = field(default_factory=list)
     writes_succeeded: List[WriteAttempt] = field(default_factory=list)
     writes_failed: List[WriteAttempt] = field(default_factory=list)
+    release_log_error: Optional[str] = None
 
     @property
     def ok(self) -> bool:
@@ -305,10 +346,17 @@ def apply(
     Precondition: `approved_by` names the human whose approval authorizes this
     apply (a future CLI resolves this from the merged PR; this function trusts
     its caller for that resolution, the same boundary `release_log.py`'s
-    docstring describes). Postcondition, on every call: exactly one
-    `ReleaseRecord` is published (success, partial failure, failure, or
-    refusal -- never silently skipped) and the returned `ApplyResult.status`
-    matches it.
+    docstring describes). Postcondition, on every call that returns normally:
+    exactly one `ReleaseRecord` is attempted for publication (success, partial
+    failure, failure, or refusal -- never silently skipped), and the returned
+    `ApplyResult.status` matches it; if publishing that record itself fails,
+    the returned `ApplyResult.release_log_error` names that failure rather
+    than raising (see module docstring's "Release-log write failure" policy).
+    On a `BaseException` escaping mid-write (e.g. `KeyboardInterrupt`), a
+    `partial_failure` record for whatever landed so far is still published
+    before the exception re-propagates (see module docstring's "Interrupted
+    mid-apply" policy) -- this is the one case where `apply()` does not return
+    at all, by design.
 
     Refuses the whole contract, writing nothing, if `validate(contract,
     client)` is not `ok` (SC-001-03, defence in depth -- see module docstring).
@@ -319,36 +367,44 @@ def apply(
     """
     validation = validate(contract, client)
     if not validation.ok:
-        return _refuse(contract, client, approved_by, validation.problems, log_path)
+        return _refuse(contract, approved_by, validation.problems, log_path)
 
     steps = _build_write_steps(contract, client)
     succeeded: List[WriteAttempt] = []
     failed: List[WriteAttempt] = []
-    for step in steps:
-        try:
-            executed_sql = step.execute()
-        except Exception as exc:  # noqa: BLE001 -- deliberate: see module docstring's partial-failure policy
-            failed.append(WriteAttempt(label=step.label, sql=step.sql, error=str(exc)))
-        else:
-            succeeded.append(WriteAttempt(label=step.label, sql=executed_sql))
+    try:
+        for step in steps:
+            try:
+                executed_sql = step.execute()
+            except Exception as exc:  # noqa: BLE001 -- deliberate: see module docstring's partial-failure policy
+                failed.append(WriteAttempt(label=step.label, sql=step.sql, error=str(exc)))
+            else:
+                succeeded.append(WriteAttempt(label=step.label, sql=executed_sql))
+    except BaseException:
+        # Not an ordinary write failure (those are caught above) -- a
+        # KeyboardInterrupt/SystemExit escaping the loop. Still publish the
+        # audit trail for whatever landed before re-raising unchanged; see
+        # module docstring's "Interrupted mid-apply" policy.
+        _publish_record(
+            contract,
+            approved_by,
+            DeploymentStatus.PARTIAL_FAILURE,
+            succeeded,
+            failed,
+            log_path,
+            summary_suffix=" (interrupted before completion)",
+        )
+        raise
 
     status = _deployment_status(succeeded, failed)
-    record = ReleaseRecord.now(
-        full_name=contract.dataset.qualifier.full_name,
-        contract_version=contract.version,
-        summary=_summary(succeeded, failed),
-        approved_by=approved_by,
-        deployment_status=status,
-        writes_succeeded=[attempt.label for attempt in succeeded],
-        writes_failed=[f"{attempt.label}: {attempt.error}" for attempt in failed],
+    release_log_error = _publish_record(contract, approved_by, status, succeeded, failed, log_path)
+    return ApplyResult(
+        status=status, writes_succeeded=succeeded, writes_failed=failed, release_log_error=release_log_error
     )
-    publish_release_record(record, log_path=log_path)
-    return ApplyResult(status=status, writes_succeeded=succeeded, writes_failed=failed)
 
 
 def _refuse(
     contract: Contract,
-    client: UCClient,
     approved_by: str,
     problems: List[str],
     log_path: Optional[Union[str, Path]],
@@ -369,8 +425,51 @@ def _refuse(
         deployment_status=DeploymentStatus.REFUSED,
         problems=problems,
     )
-    publish_release_record(record, log_path=log_path)
-    return ApplyResult(status=DeploymentStatus.REFUSED, problems=problems)
+    release_log_error = _publish_or_flag(record, log_path)
+    return ApplyResult(status=DeploymentStatus.REFUSED, problems=problems, release_log_error=release_log_error)
+
+
+def _publish_record(
+    contract: Contract,
+    approved_by: str,
+    status: DeploymentStatus,
+    succeeded: List[WriteAttempt],
+    failed: List[WriteAttempt],
+    log_path: Optional[Union[str, Path]],
+    *,
+    summary_suffix: str = "",
+) -> Optional[str]:
+    """Build and publish the `ReleaseRecord` for one write attempt (ordinary
+    completion or an interrupted one), returning `_publish_or_flag`'s verdict."""
+    record = ReleaseRecord.now(
+        full_name=contract.dataset.qualifier.full_name,
+        contract_version=contract.version,
+        summary=_summary(succeeded, failed) + summary_suffix,
+        approved_by=approved_by,
+        deployment_status=status,
+        writes_succeeded=[attempt.label for attempt in succeeded],
+        writes_failed=[f"{attempt.label}: {attempt.error}" for attempt in failed],
+    )
+    return _publish_or_flag(record, log_path)
+
+
+def _publish_or_flag(record: ReleaseRecord, log_path: Optional[Union[str, Path]]) -> Optional[str]:
+    """Publish `record`, returning `None` on success. Never raises: a
+    release-log write failure must never mask whatever catalogue-write outcome
+    already happened, or crash a caller that already got real work done (see
+    module docstring's "Release-log write failure" policy). On failure,
+    returns a human-readable message naming this as a manual audit action
+    required, with the underlying error, for `ApplyResult.release_log_error`.
+    """
+    try:
+        publish_release_record(record, log_path=log_path)
+    except Exception as exc:  # noqa: BLE001 -- deliberate, see module docstring
+        return (
+            f"MANUAL AUDIT ACTION REQUIRED: catalogue changes for {record.full_name!r} "
+            f"(deployment_status={record.deployment_status.value}) were applied, but the "
+            f"release record failed to persist: {exc}"
+        )
+    return None
 
 
 def _deployment_status(succeeded: List[WriteAttempt], failed: List[WriteAttempt]) -> DeploymentStatus:

@@ -178,7 +178,8 @@ def evaluate_rules(
 _IS_NOT_NULL_RE = re.compile(r"^(?P<col>[A-Za-z_][A-Za-z0-9_]*)\s+IS\s+NOT\s+NULL$", re.IGNORECASE)
 _IS_NULL_RE = re.compile(r"^(?P<col>[A-Za-z_][A-Za-z0-9_]*)\s+IS\s+NULL$", re.IGNORECASE)
 _COMPARISON_RE = re.compile(
-    r"^(?P<lhs>[A-Za-z_][A-Za-z0-9_]*)\s*(?P<op>>=|<=|!=|=|>|<)\s*(?P<rhs>.+)$"
+    r"^(?P<lhs>[A-Za-z_][A-Za-z0-9_]*)\s*(?P<op>>=|<=|!=|=|>|<)\s*"
+    r"(?P<rhs>'[^']*'|-?\d+(?:\.\d+)?|[A-Za-z_][A-Za-z0-9_]*)$"
 )
 _NUMBER_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
 
