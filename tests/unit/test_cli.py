@@ -238,6 +238,37 @@ def test_coverage_reports_over_a_small_set_of_fixture_contracts(tmp_path: Path, 
     assert '"dataset_count": 3' in output_path.read_text()
 
 
+def test_coverage_cli_omits_publish_history_by_default(tmp_path: Path, capsys):
+    """`--publish-history` is opt-in (spec F-PLATFORM-002 SC-002-03): the
+    default coverage run prints nothing about it, the same output as before
+    this feature existed -- see test_coverage_history.py for the mechanical
+    no-RealUCClient guard this default relies on."""
+    output_path = tmp_path / "coverage_report.json"
+
+    exit_code = cli.main(["coverage", str(FIXTURES_DIR), "-o", str(output_path)])
+
+    assert exit_code == 0
+    assert "Published coverage history" not in capsys.readouterr().out
+
+
+def test_coverage_cli_publish_history_flag_appends_one_row_per_dataset_via_the_fake(
+    tmp_path: Path, capsys
+):
+    """`--publish-history` wires `_cmd_coverage` through to
+    `coverage_history.publish_coverage_history`, against this same run's
+    (fake, by default) client -- see test_coverage_history.py for the
+    row-shape and whole-run-or-nothing assertions this CLI test does not
+    duplicate."""
+    output_path = tmp_path / "coverage_report.json"
+
+    exit_code = cli.main(["coverage", str(FIXTURES_DIR), "-o", str(output_path), "--publish-history"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Published coverage history for run" in out
+    assert "3 row(s) appended to workspace.platform.coverage_history" in out
+
+
 # ---- propose: the CLI wires its arguments through to propose.py -----------------
 
 

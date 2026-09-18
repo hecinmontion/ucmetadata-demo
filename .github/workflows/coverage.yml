@@ -16,6 +16,22 @@
 # `--live` and a real service-principal credential to certify tier claims
 # against genuinely current quality-check results, not just contract content
 # and a fixture snapshot -- named here rather than glossed over.
+#
+# `--publish-history` (spec F-PLATFORM-002; ADR-008): scheduled runs publish
+# history, per Rules & Constraints ("publishing history is off by default in
+# offline runs and on in the scheduled and live paths"). This step still runs
+# against `FakeUCClient`, not `RealUCClient` -- the same credential-free
+# reasoning above applies unchanged, and a scheduled run against the fake has
+# no real warehouse to write history rows to. `FakeUCClient.insert_rows` is a
+# real interface, fake implementation behind it (same seam as every other
+# `UCClient` write): this step genuinely exercises `ucmeta coverage`'s
+# `--publish-history` code path end to end -- argument parsing, run-id
+# generation, `publish_coverage_history`'s row building and its call into
+# `UCClient.insert_rows` -- with no credential and no network, proving the
+# mechanism runs on a schedule rather than only being reachable by hand. It
+# is not a substitute for `--live` publishing into the real
+# `workspace.platform.coverage_history` table, which is the live verification
+# this feature's build report records separately.
 name: coverage
 
 on:
@@ -41,7 +57,7 @@ jobs:
         run: uv sync --frozen
 
       - name: ucmeta coverage
-        run: uv run ucmeta coverage contracts/ -o coverage_report.json
+        run: uv run ucmeta coverage contracts/ -o coverage_report.json --publish-history
 
       # Published as a downloadable workflow artifact rather than to GitHub
       # Pages. GitHub Pages (actions/upload-pages-artifact +

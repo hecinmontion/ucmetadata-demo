@@ -41,7 +41,7 @@ testpaths = ["tests"]
 # test_demo_scenario.py to satisfy pytest's default glob would fight that.
 python_files = ["test_*.py", "demo_scenario.py"]
 markers = [
-    "scenario: binds a test to a scenario ID in specs/F-PLATFORM-001-uc-metadata-contracts.md",
+    "scenario: binds a test to a scenario ID in specs/F-PLATFORM-001-uc-metadata-contracts.md or specs/F-PLATFORM-002-coverage-history-and-native-dashboard.md",
     "uc_live: exercises RealUCClient against the live Free Edition workspace; needs network and the ucmeta OAuth profile, gated by UC_LIVE_TESTS=1",
     "llm_live: makes a real Anthropic API call and records a fixture; needs ANTHROPIC_API_KEY, gated by LLM_LIVE_TESTS=1",
 ]

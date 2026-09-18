@@ -21,6 +21,7 @@ from uc_metadata.uc_client import (
     UCColumn,
     UCTable,
     UCTableNotFoundError,
+    build_insert_sql,
     kv_clause,
     quote_full_name,
     quote_ident,
@@ -277,6 +278,14 @@ class FakeUCClient:
 
     def __init__(self, tables: Dict[str, _FakeTable] | None = None) -> None:
         self._tables: Dict[str, _FakeTable] = tables if tables is not None else default_fixture_tables()
+        # In-memory backing for `insert_rows` -- a plain append-only row store
+        # keyed by full name, distinct from `self._tables` (which models a
+        # dataset's columns/comment/tags, not arbitrary inserted rows). This
+        # is what `coverage_history.publish_coverage_history` writes into
+        # under the fake, and `inserted_rows` below is the only way to read
+        # it back -- there is no `insert_rows`-side `get_table` equivalent,
+        # because this store never claims to be a real dataset's schema.
+        self._row_tables: Dict[str, List[Dict[str, Any]]] = {}
 
     # ---- reads -----------------------------------------------------------------
 
@@ -374,6 +383,23 @@ class FakeUCClient:
         column = self._require_column(full_name, column_name)
         column.tags.update(tags)  # merge, same semantics as ALTER COLUMN ... SET TAGS
         return sql
+
+    def insert_rows(self, full_name: str, rows: List[Dict[str, Any]], *, dry_run: bool = False) -> str:
+        sql = build_insert_sql(full_name, rows)  # validates shape identically to RealUCClient
+        if dry_run:
+            return sql
+        self._row_tables.setdefault(full_name, []).extend(dict(row) for row in rows)
+        return sql
+
+    def inserted_rows(self, full_name: str) -> List[Dict[str, Any]]:
+        """Test-only accessor: every row `insert_rows` has actually appended
+        to `full_name` (real writes only, `dry_run=True` never lands here),
+        in append order. Not part of `UCClient` -- `RealUCClient` has no
+        equivalent, since asserting on real warehouse state means running a
+        `SELECT` instead; this exists so a unit test can assert exactly what
+        a run would have appended with no network, matching this module's own
+        docstring's reason for existing at all."""
+        return [dict(row) for row in self._row_tables.get(full_name, [])]
 
     # ---- internal lookups ----------------------------------------------------
 

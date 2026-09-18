@@ -158,6 +158,25 @@ def test_set_table_tags_is_idempotent_and_readable_back(client: UCClient):
     assert client.get_table(TABLE).tags["uc_metadata_contract_test"] == "true"
 
 
+def test_insert_rows_dry_run_has_the_same_shape_on_both_implementations(client: UCClient):
+    """`insert_rows` (added for `coverage_history.publish_coverage_history`, spec
+    F-PLATFORM-002) renders the same multi-row `INSERT INTO ... VALUES` shape on
+    both implementations. `dry_run=True` needs no target table to exist (same
+    precondition every other write method's `dry_run` path has), so this runs
+    against `TABLE` on both the fake and the live workspace with no write made --
+    `publish_coverage_history`'s own tests (`tests/unit/test_coverage_history.py`)
+    and this feature's live verification already exercise a real, non-dry-run
+    `insert_rows` against the real `workspace.platform.coverage_history` table."""
+    rows = [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]
+
+    sql = client.insert_rows(TABLE, rows, dry_run=True)
+
+    assert sql.startswith("INSERT INTO")
+    assert "VALUES" in sql
+    assert "1, 'x'" in sql
+    assert "2, 'y'" in sql
+
+
 def test_set_column_tags_is_scoped_to_the_named_column(client: UCClient):
     """Column tags land on the named column's `tags` dict, not on other columns or
     on the table-level tags."""

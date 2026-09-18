@@ -42,6 +42,7 @@ Design decisions worth stating rather than leaving implicit:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Protocol, runtime_checkable
 
 # The Free Edition workspace this prototype targets (spec: F-PLATFORM-001, Rules &
@@ -173,6 +174,26 @@ class UCClient(Protocol):
         """
         ...
 
+    def insert_rows(self, full_name: str, rows: List[Mapping[str, Any]], *, dry_run: bool = False) -> str:
+        """Append every row in `rows` to `full_name` via one multi-row `INSERT
+        INTO ... VALUES` statement -- the one write shape none of the methods
+        above cover, since every other write mutates a table's own comment,
+        properties or tags rather than appending data rows (added for
+        `coverage_history.publish_coverage_history`; see `build_insert_sql`
+        below for the shared SQL-building code both implementations use).
+        Returns the SQL executed (or, if `dry_run=True`, the SQL that would be
+        executed, with no write made).
+
+        Precondition: `rows` is non-empty and every row has exactly the same
+        set of keys (order-independent) -- those keys become the INSERT's
+        explicit column list, in the first row's key order. Postcondition: on
+        success, every row in `rows` lands or none do -- one SQL statement
+        with multiple `VALUES` tuples is atomic at the warehouse, which is
+        what makes an append-only, whole-run-or-nothing write possible
+        without this seam reimplementing rollback.
+        """
+        ...
+
 
 # ---- SQL-building helpers shared by both implementations (identical quoting rules
 # so the SQL strings FakeUCClient hands back for assertions look like RealUCClient's) --
@@ -226,6 +247,61 @@ def kv_clause(mapping: Mapping[str, str]) -> str:
     """Render a `{key: value}` mapping as the `'key' = 'value', ...` clause
     `SET TBLPROPERTIES (...)` and `SET TAGS (...)` both expect."""
     return ", ".join(f"{quote_literal(k)} = {quote_literal(v)}" for k, v in mapping.items())
+
+
+def render_sql_value(value: Any) -> str:
+    """Render one Python value as a SQL literal for an `INSERT ... VALUES`
+    tuple (`insert_rows`' one caller, `build_insert_sql`, below).
+
+    `None` -> `NULL`. `bool` -> `TRUE`/`FALSE`, checked before `int` because
+    `bool` is an `int` subclass in Python and would otherwise render as `0`/
+    `1`. `int`/`float` -> the number itself, unquoted. `datetime` -> a quoted
+    `TIMESTAMP` literal via its ISO 8601 string. Anything else -> `str(value)`
+    through `quote_literal`, reusing this module's own escaping -- including
+    the live-confirmed backslash-doubling `quote_literal`'s own docstring
+    describes, so a value written through `insert_rows` gets that fix for
+    free rather than needing a second, unescaped string-building path.
+    """
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, datetime):
+        return f"TIMESTAMP {quote_literal(value.isoformat())}"
+    return quote_literal(str(value))
+
+
+def build_insert_sql(full_name: str, rows: List[Mapping[str, Any]]) -> str:
+    """Build one multi-row `INSERT INTO <full_name> (<columns>) VALUES (...),
+    (...)` statement -- the SQL-building code `insert_rows` on both
+    `RealUCClient` and `FakeUCClient` share, so a planned/executed statement
+    can never silently diverge into two implementations (the same discipline
+    `_build_write_steps` in `apply.py` uses for its writes).
+
+    Precondition: `full_name` is a three-part name; `rows` is non-empty and
+    every row has exactly the same set of keys -- raises `ValueError` naming
+    the mismatch otherwise, since a caller passing rows with different shapes
+    would otherwise produce a statement whose columns silently don't line up
+    with its values row to row.
+    """
+    require_three_part_name(full_name)
+    if not rows:
+        raise ValueError("rows must not be empty")
+    columns = list(rows[0].keys())
+    expected_keys = set(columns)
+    for row in rows:
+        if set(row.keys()) != expected_keys:
+            raise ValueError(
+                f"every row passed to insert_rows must have the same columns; "
+                f"expected {sorted(expected_keys)}, got {sorted(row.keys())}"
+            )
+    column_clause = ", ".join(quote_ident(column) for column in columns)
+    values_clauses = [
+        "(" + ", ".join(render_sql_value(row[column]) for column in columns) + ")" for row in rows
+    ]
+    return f"INSERT INTO {quote_full_name(full_name)} ({column_clause}) VALUES " + ", ".join(values_clauses)
 
 
 # Polling budget for a write/read whose warehouse is still cold-starting. A serverless
@@ -405,6 +481,13 @@ class RealUCClient:
             f"ALTER TABLE {quote_full_name(full_name)} ALTER COLUMN {quote_ident(column_name)} "
             f"SET TAGS ({kv_clause(tags)})"
         )
+        if dry_run:
+            return sql
+        self._run_statement(sql)
+        return sql
+
+    def insert_rows(self, full_name: str, rows: List[Mapping[str, Any]], *, dry_run: bool = False) -> str:
+        sql = build_insert_sql(full_name, rows)
         if dry_run:
             return sql
         self._run_statement(sql)

@@ -1,7 +1,9 @@
 # ADR-008: Coverage history as a Unity Catalog table, with a native AI/BI dashboard over it
 
-- **Status:** Accepted (decision recorded; the table, the publish step and the dashboard
-  definition are not built yet — `dashboard/app.py` is unchanged and stays that way)
+- **Status:** Accepted; table and publish step built (`workspace.platform.coverage_history`,
+  `coverage_history.py`, `ucmeta coverage --publish-history`, live-verified with two real runs).
+  The dashboard definition (`.lvdash.json`) is a separate, later phase and is not built yet —
+  `dashboard/app.py` is unchanged and stays that way
 - **Date:** 2026-09-18
 - **Decider:** hector
 - **Affects:** `src/uc_metadata/coverage.py` (a publish-history step behind one narrow interface),

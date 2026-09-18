@@ -60,6 +60,11 @@ from pydantic import ValidationError
 from uc_metadata import harvest as harvest_module
 from uc_metadata.apply import ApplyResult, apply as apply_contract, plan_apply
 from uc_metadata.coverage import CoverageReport, compute_coverage_for_directory
+from uc_metadata.coverage_history import (
+    DEFAULT_COVERAGE_HISTORY_TABLE,
+    generate_run_id,
+    publish_coverage_history,
+)
 from uc_metadata.fake_uc import FakeUCClient
 from uc_metadata.harvest import harvest as harvest_contract
 from uc_metadata.models import CertificationTier, Contract, Refresh
@@ -79,7 +84,7 @@ _DEFAULT_CONTRACTS_DIR = _REPO_ROOT / "contracts"
 # than a raw traceback. Anything not in this tuple is a bug, not a user mistake,
 # and is left to surface as a real traceback rather than being silently masked.
 _EXPECTED_ERRORS = (
-    UCClientError,
+    UCClientError,  # CoverageHistoryPublishError is a UCClientError subclass, already covered here
     UnknownBusinessApplicationError,
     FileNotFoundError,
     ValueError,
@@ -276,7 +281,27 @@ def _cmd_coverage(args: argparse.Namespace, client: UCClient) -> int:
     if args.output:
         Path(args.output).write_text(report.model_dump_json(indent=2) + "\n")
         print(f"\nWrote JSON coverage report to {args.output}")
+    if args.publish_history:
+        _publish_history(report, client)
     return 0
+
+
+def _publish_history(report: CoverageReport, client: UCClient) -> None:
+    """`--publish-history`'s one call site. Deliberately after the report is
+    already computed and (if requested) already written to disk -- spec Rules
+    & Constraints: "coverage is still computed and the point-in-time report
+    is still written, because publishing history is a step after the
+    measurement, not a precondition of it." A `CoverageHistoryPublishError`
+    here propagates out of `_cmd_coverage` to `main`'s `_EXPECTED_ERRORS`
+    handling, which prints it and exits non-zero -- loud, not swallowed, and
+    the report file on disk already reflects a successful measurement
+    regardless of how this step ends."""
+    run_id = generate_run_id()
+    publish_coverage_history(report, client, run_id)
+    print(
+        f"\nPublished coverage history for run {run_id!r}: {report.dataset_count} row(s) "
+        f"appended to {DEFAULT_COVERAGE_HISTORY_TABLE}"
+    )
 
 
 def _print_coverage_summary(report: CoverageReport) -> None:
@@ -419,6 +444,17 @@ def _add_coverage_parser(subparsers) -> None:
             "`python dashboard/app.py <this-path>` to render the static HTML dashboard -- "
             "rendering deliberately stays a separate script, not a flag here; see dashboard/app.py's "
             "module docstring for why."
+        ),
+    )
+    parser.add_argument(
+        "--publish-history",
+        action="store_true",
+        help=(
+            "After computing coverage, append one row per dataset to the coverage-history table "
+            f"({DEFAULT_COVERAGE_HISTORY_TABLE}) via this same run's client (fake or --live), "
+            "through uc_metadata.coverage_history.publish_coverage_history. Off by default: the "
+            "offline default never even calls this, so it never attempts a warehouse or history-table "
+            "write (spec SC-002-03). On in the scheduled and live paths, per .github/workflows/coverage.yml."
         ),
     )
     _add_client_args(parser)
