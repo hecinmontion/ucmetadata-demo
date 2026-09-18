@@ -28,6 +28,7 @@ declaration has not yet made a safety claim about.
 
 from __future__ import annotations
 
+import posixpath
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,12 +102,27 @@ def _classify_path(path: str, globs: _ChangeClassGlobs) -> ChangeClass:
     `content_exclude` is checked ahead of `content` so a path carved out of the
     content glob set (e.g. `contracts/_schema/...`) never classifies as content
     even if `change_classes.yaml`'s `schema` list were ever to fall out of sync
-    with it."""
-    if any(pattern.match(path) for pattern in globs.content_exclude):
+    with it.
+
+    Normalizes `path` (collapsing `..`/`.` segments, `posixpath`-style, since
+    `changed_paths` is documented as forward-slash-separated) before matching
+    against any glob -- `_glob_to_regex` matches the literal string, so a `..`
+    component left un-normalized could textually satisfy a `content` glob while
+    also textually containing a schema-owned path segment (a real gap, not a
+    theoretical one; see this module's adversarial test coverage). A path whose
+    normalized form still starts with `../` (i.e. it claims to reach outside the
+    repository root `changed_paths` is documented to be relative to) is treated
+    as unrecognized/out-of-policy and fails closed to `schema`, the same policy
+    this function already applies to a path matching neither declared class.
+    """
+    normalized = posixpath.normpath(path)
+    if normalized == ".." or normalized.startswith("../"):
+        return "schema"  # claims to escape the repo root: fail closed
+    if any(pattern.match(normalized) for pattern in globs.content_exclude):
         return "schema"
-    if any(pattern.match(path) for pattern in globs.schema):
+    if any(pattern.match(normalized) for pattern in globs.schema):
         return "schema"
-    if any(pattern.match(path) for pattern in globs.content):
+    if any(pattern.match(normalized) for pattern in globs.content):
         return "content"
     return "schema"  # matches neither declared class: fail closed
 
