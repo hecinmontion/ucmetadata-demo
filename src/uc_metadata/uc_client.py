@@ -182,7 +182,7 @@ def require_three_part_name(full_name: str) -> None:
     """Precondition check shared by both implementations. Raises `ValueError` if
     `full_name` is not a non-empty `catalog.schema.table` name."""
     parts = full_name.split(".")
-    if len(parts) != 3 or not all(parts):
+    if len(parts) != 3 or not all(part.strip() for part in parts):
         raise ValueError(f"expected a catalog.schema.table three-part name, got {full_name!r}")
 
 

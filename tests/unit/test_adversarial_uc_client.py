@@ -204,15 +204,15 @@ def test_require_three_part_name_rejects_every_malformed_shape(bad_name: str):
         require_three_part_name(bad_name)
 
 
-def test_require_three_part_name_does_not_reject_a_whitespace_only_middle_part():
-    """Documented finding, not a fix: `require_three_part_name` checks `all(parts)`
-    -- truthiness, not emptiness-after-strip -- so a middle part that is pure
-    whitespace (`"a. .b"`) is *not* rejected here, even though it is not a
-    legal Unity Catalog identifier and would eventually fail (or, worse,
-    silently resolve to something unintended) wherever it is actually used.
-    The precondition check is weaker than its own docstring implies
-    ("a non-empty catalog.schema.table three-part name")."""
-    require_three_part_name("a. .b")  # does not raise -- see docstring above
+def test_require_three_part_name_rejects_a_whitespace_only_middle_part():
+    """Fixed: `require_three_part_name` used to check `all(parts)` --
+    truthiness, not emptiness-after-strip -- so a middle part that is pure
+    whitespace (`"a. .b"`) was not rejected, even though it is not a legal
+    Unity Catalog identifier. It now checks `all(part.strip() for part in
+    parts)`, matching its own docstring ("a non-empty catalog.schema.table
+    three-part name")."""
+    with pytest.raises(ValueError, match="three-part name"):
+        require_three_part_name("a. .b")
 
 
 def test_require_three_part_name_rejects_a_name_with_embedded_backtick():
