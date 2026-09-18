@@ -197,8 +197,29 @@ def quote_full_name(full_name: str) -> str:
 
 
 def quote_literal(value: str) -> str:
-    """Single-quote a SQL string literal, escaping any embedded single quote."""
-    return "'" + str(value).replace("'", "''") + "'"
+    """Single-quote a SQL string literal, escaping embedded backslashes and single
+    quotes by doubling each (backslashes first, so a backslash introduced ahead of
+    an escaped quote is never itself left unescaped).
+
+    The backslash-doubling was added after a live-confirmed bug: this session's
+    warehouse parses string literals in `escapedStringLiterals=true`-style legacy
+    mode, where a lone backslash immediately before the closing `'` is read as an
+    escape for that quote character, leaving the DDL statement's string literal
+    unterminated (`PARSE_SYNTAX_ERROR`) -- reproduced live via `COMMENT ON TABLE
+    ... IS '...ends in a backslash\\'`, the exact grammar context every write in
+    this module uses (`COMMENT ON ... IS`, `SET TBLPROPERTIES`/`SET TAGS`).
+    Doubling every backslash first, then doubling every single quote, round-trips
+    correctly against the live warehouse for a plain backslash, a trailing
+    backslash, multiple consecutive backslashes, and a backslash immediately
+    followed by a quote, without regressing the already-verified cases (single
+    quote, backtick, semicolon, SQL comment marker, Unicode) -- confirmed live via
+    `RealUCClient.set_table_comment`/`get_table` round-trips, not by reasoning
+    about the SQL standard alone (a bare `SELECT '...'` literal parses these same
+    inputs differently on this warehouse, which is why the probe went through the
+    actual DDL code path rather than a `SELECT`).
+    """
+    escaped = str(value).replace("\\", "\\\\").replace("'", "''")
+    return "'" + escaped + "'"
 
 
 def kv_clause(mapping: Mapping[str, str]) -> str:

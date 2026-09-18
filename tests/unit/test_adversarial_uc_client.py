@@ -148,30 +148,32 @@ def test_quote_literal_preserves_unicode_combining_and_bidi_control_characters()
     assert quoted == f"'{hostile}'"
 
 
-def test_quote_literal_does_not_escape_backslashes():
-    """Documented finding, not a fix: `quote_literal` only doubles embedded
-    single quotes; it does not touch backslashes. Under ANSI SQL semantics
-    (`spark.sql.parser.escapedStringLiterals=false`, Databricks SQL's default)
-    a bare backslash has no special meaning and this is safe -- verified by
-    hand-tracing the doubled-quote escaping below. Under *legacy* Spark SQL
-    parsing (`escapedStringLiterals=true`, C-style backslash escapes enabled),
-    a value ending in a single backslash immediately followed by the closing
-    quote (`...\\'`) risks the closing quote being consumed as part of a
-    `\\'` escape sequence instead of terminating the literal, which would
-    leave the DDL statement's string literal unterminated.
-
-    This test only pins down the *string this module constructs*, not how a
-    live SQL parser reads it -- that needs a `uc_live` test against the real
-    warehouse (see `test_adversarial_uc_client.py`'s live section below);
-    flagged here as the reasoning for why that live test exists.
-    """
+def test_quote_literal_escapes_a_trailing_backslash():
+    """Fixed: a value ending in a single backslash immediately before the
+    closing quote used to leave the constructed SQL with an unterminated
+    string literal on the live warehouse (`...\\'` was read as the
+    backslash escaping the quote character rather than the quote closing
+    the literal -- see `test_quote_literal_trailing_backslash_round_trips_
+    against_the_live_warehouse` below for the live proof). `quote_literal`
+    now doubles the backslash first, so the closing quote is never adjacent
+    to an odd number of backslashes."""
     value = "trailing backslash\\"
     quoted = quote_literal(value)
-    # No backslash-doubling happens: the trailing "\\" (one backslash) survives
-    # as a single backslash immediately before the closing quote.
-    assert quoted == "'trailing backslash\\'"
-    assert quoted[-2] == "\\"
-    assert quoted[-1] == "'"
+    assert quoted == "'trailing backslash\\\\'"
+
+
+def test_quote_literal_escapes_a_plain_and_multiple_consecutive_backslashes():
+    assert quote_literal("a\\b") == "'a\\\\b'"
+    assert quote_literal("a\\\\\\b") == "'a\\\\\\\\\\\\b'"  # three backslashes -> six
+
+
+def test_quote_literal_escapes_a_backslash_immediately_followed_by_a_quote():
+    """The case that most directly motivated doubling backslashes *before*
+    doubling quotes: escaping the quote alone would leave `\\''` -- a single
+    backslash still immediately adjacent to (now doubled) quote characters.
+    Doubling the backslash first produces `\\\\''`, an even run of
+    backslashes followed by the escaped quote, which parses unambiguously."""
+    assert quote_literal("a\\'b") == "'a\\\\''b'"
 
 
 # ---- quote_full_name / require_three_part_name --------------------------------------
@@ -239,7 +241,7 @@ def test_kv_clause_handles_an_empty_value_string():
 
 
 # ---- live: does the real Databricks SQL parser actually round-trip the ----------
-# ---- trailing-backslash edge case `quote_literal` itself cannot settle? ---------
+# ---- backslash-doubling fix, in the exact DDL context quote_literal is used in? -
 
 
 @pytest.mark.uc_live
@@ -248,14 +250,17 @@ def test_kv_clause_handles_an_empty_value_string():
     reason="set UC_LIVE_TESTS=1 to run this against the live Free Edition workspace",
 )
 def test_quote_literal_trailing_backslash_round_trips_against_the_live_warehouse():
-    """The one thing `test_quote_literal_does_not_escape_backslashes` could not
-    settle from the Python side alone: whether the live warehouse's SQL parser
-    (ANSI mode vs. legacy `escapedStringLiterals=true`) reads
-    `COMMENT ON TABLE ... IS '...ends in a backslash\\'` back as the exact
-    original string, or mis-parses the boundary between the trailing backslash
-    and the closing quote. Restores the table's original comment afterwards so
-    a live run leaves nothing behind beyond this one comment write + restore,
-    matching this suite's existing live-write convention.
+    """Live proof of the bug this module's `quote_literal` fix addresses, and
+    that the fix holds: this warehouse's SQL parser reads
+    `COMMENT ON TABLE ... IS '...ends in a backslash\\'` (single trailing
+    backslash, the old unescaped output) as the backslash escaping the
+    closing quote, leaving the literal unterminated (`PARSE_SYNTAX_ERROR`) --
+    confirmed by hand against the live workspace before this fix landed.
+    `quote_literal` now doubles the backslash, and this test confirms that
+    doubled form round-trips through the real DDL path and back out through
+    `TablesAPI.get`, byte for byte. Restores the table's original comment
+    afterwards so a live run leaves nothing behind beyond this one comment
+    write + restore, matching this suite's existing live-write convention.
     """
     client = RealUCClient()
     original_comment = client.get_table(TABLE).comment
@@ -266,8 +271,8 @@ def test_quote_literal_trailing_backslash_round_trips_against_the_live_warehouse
         landed = client.get_table(TABLE).comment
         assert landed == adversarial, (
             "the live SQL parser did not round-trip a value ending in a single "
-            "backslash -- quote_literal() does not escape backslashes at all, "
-            "and this is the concrete, live proof of whether that is actually safe"
+            "backslash -- quote_literal()'s backslash-doubling fix did not hold "
+            "against the real warehouse"
         )
     finally:
         client.set_table_comment(TABLE, original_comment or "")
