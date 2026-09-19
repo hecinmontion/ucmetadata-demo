@@ -4,25 +4,22 @@
 # apply"). This workflow is the forcing function `validate.yml` alone cannot
 # be: it demonstrates apply wired to `main`, not to a manually clicked button.
 #
-# Credential-free by design, not by oversight: `ucmeta apply` below omits
-# `--live`, so every write in this workflow lands on `FakeUCClient` (the
-# CLI's own default), never on a real Databricks workspace. This is a public
-# repository demonstrating a real interview submission; a personal Free
-# Edition OAuth profile has no business being a public-repo GitHub Actions
-# secret, and requiring one would break this workflow for any fork. What this
-# workflow proves is the apply-on-merge *mechanism* -- the gate fires on push
-# to main, resolves exactly the contracts that changed, and fails the job if
-# any of them doesn't fully apply -- reproducibly, for anyone who forks this
-# repo, with zero setup.
+# Layer 1 of F-PLATFORM-003 / ADR-009: this job runs as `ucmeta-ci-apply`, a
+# non-human service principal with only the grants apply.py needs on the
+# three demo tables (see scripts/provision_ci_apply_identity.sh and
+# docs/ci-service-principal.md) -- never as a person, and never with a
+# personal access token.
 #
-# Honest gap, named rather than glossed over: in a real deployment, this is
-# where `--live` (or an environment-appropriate real UCClient) would run
-# against the target organisation's actual Unity Catalog workspace, gated by
-# a real service-principal credential stored as a proper CI secret (an
-# OAuth machine-to-machine identity, per the spec's Security section -- never
-# a long-lived personal access token). That production wiring is not built
-# here; this workflow demonstrates the gate mechanism against the reproducible
-# in-repo fake, not a production write.
+# Fork-safe by construction, not by oversight (SC-003-04): the "write a
+# credentials profile, then apply --live" step only runs when
+# DATABRICKS_CI_HOST / DATABRICKS_CI_CLIENT_ID / DATABRICKS_CI_CLIENT_SECRET
+# are all configured as repository secrets. A fork or clone with none of
+# those configured -- the interview-panel case F-PLATFORM-001 guarantees --
+# takes the other branch below: it runs the exact same apply-on-merge
+# mechanism against the in-repository `FakeUCClient`, says plainly that no
+# automation credential is configured, and still exits successfully. Which
+# branch ran is unmistakable in the job's own printed output, and no step in
+# this file ever echoes a secret value.
 name: apply
 
 on:
@@ -47,6 +44,49 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra dev --frozen
+
+      # ---- CI machine identity, wired only if it's actually configured -------
+      # Reads the three secrets into env vars (never interpolated into `if:`
+      # expressions or echoed) and reports only whether all three are
+      # present. A fork or clone with none configured gets empty env vars
+      # here and `configured=false`, which is exactly SC-003-04's case.
+      - name: Check whether a CI apply credential is configured
+        id: credential
+        env:
+          DATABRICKS_CI_HOST: ${{ secrets.DATABRICKS_CI_HOST }}
+          DATABRICKS_CI_CLIENT_ID: ${{ secrets.DATABRICKS_CI_CLIENT_ID }}
+          DATABRICKS_CI_CLIENT_SECRET: ${{ secrets.DATABRICKS_CI_CLIENT_SECRET }}
+        run: |
+          if [ -n "$DATABRICKS_CI_HOST" ] && [ -n "$DATABRICKS_CI_CLIENT_ID" ] && [ -n "$DATABRICKS_CI_CLIENT_SECRET" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "A CI apply credential is configured; this run will apply live as ucmeta-ci-apply."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "No CI apply credential is configured (DATABRICKS_CI_HOST / DATABRICKS_CI_CLIENT_ID / DATABRICKS_CI_CLIENT_SECRET); this run will demonstrate the apply-on-merge mechanism against the in-repository fake catalogue instead."
+          fi
+
+      # Writes a `~/.databrickscfg` profile from the three secrets -- the seam
+      # F-PLATFORM-003's build verdict recommends: RealUCClient.__init__
+      # already resolves an arbitrary named profile (confirmed live,
+      # 2026-09-19: `--profile ucmeta-ci` against a hand-authenticated local
+      # profile worked end-to-end with zero code changes), so CI only needs
+      # to make that profile exist before the job runs. Only ever runs when
+      # step `credential` found all three secrets present; never prints their
+      # values, only that the file was written.
+      - name: Write the CI apply Databricks profile
+        if: steps.credential.outputs.configured == 'true'
+        env:
+          DATABRICKS_CI_HOST: ${{ secrets.DATABRICKS_CI_HOST }}
+          DATABRICKS_CI_CLIENT_ID: ${{ secrets.DATABRICKS_CI_CLIENT_ID }}
+          DATABRICKS_CI_CLIENT_SECRET: ${{ secrets.DATABRICKS_CI_CLIENT_SECRET }}
+        run: |
+          {
+            echo "[ucmeta-ci-apply]"
+            echo "host = ${DATABRICKS_CI_HOST}"
+            echo "client_id = ${DATABRICKS_CI_CLIENT_ID}"
+            echo "client_secret = ${DATABRICKS_CI_CLIENT_SECRET}"
+          } >> ~/.databrickscfg
+          echo "Wrote a ucmeta-ci-apply OAuth M2M profile to ~/.databrickscfg (values not printed)."
 
       # ---- changed-file discovery --------------------------------------------
       # Mechanism: `git diff --name-only <before>..<after>`, where `before`/
@@ -97,12 +137,31 @@ jobs:
       # the closest identity GitHub Actions exposes to "who approved this
       # change landing on main" without a second API call to resolve the PR's
       # reviewers.
-      - name: ucmeta apply each changed contract
-        if: steps.contracts.outputs.count != '0'
+      #
+      # Two mutually exclusive steps below, gated on `steps.credential`'s
+      # output rather than one step branching internally, so which one ran is
+      # visible directly in the job's step list, not just in its log text
+      # (SC-003-04: "unmistakable in the job's output").
+      - name: ucmeta apply each changed contract (live, as ucmeta-ci-apply)
+        if: steps.contracts.outputs.count != '0' && steps.credential.outputs.configured == 'true'
         run: |
+          echo "Applying live against the real Unity Catalog workspace as ucmeta-ci-apply."
           failures=0
           while IFS= read -r contract; do
-            echo "::group::ucmeta apply ${contract}"
+            echo "::group::ucmeta apply ${contract} --live --profile ucmeta-ci-apply"
+            uv run ucmeta apply "${contract}" --live --profile ucmeta-ci-apply --approved-by "${{ github.actor }}" || failures=1
+            echo "::endgroup::"
+          done < changed_contracts.txt
+          exit "${failures}"
+
+      - name: ucmeta apply each changed contract (fake -- no CI credential configured)
+        if: steps.contracts.outputs.count != '0' && steps.credential.outputs.configured == 'false'
+        run: |
+          echo "No CI apply credential is configured for this repository/fork."
+          echo "Demonstrating the apply-on-merge mechanism against the in-repository FakeUCClient instead of a real Databricks workspace. No live write is attempted."
+          failures=0
+          while IFS= read -r contract; do
+            echo "::group::ucmeta apply ${contract} (fake)"
             uv run ucmeta apply "${contract}" --approved-by "${{ github.actor }}" || failures=1
             echo "::endgroup::"
           done < changed_contracts.txt

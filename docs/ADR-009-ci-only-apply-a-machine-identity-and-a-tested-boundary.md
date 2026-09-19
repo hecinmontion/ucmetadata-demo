@@ -1,20 +1,25 @@
 # ADR-009: CI-only apply — a machine identity for the write path, and a tested boundary on the human's
 
-- **Status:** Accepted, and partially built. The workspace side is live: service principal
+- **Status:** Accepted, and built. The workspace side is live: service principal
   `ucmeta-ci-apply` exists and holds the applier's grants; ownership of all three demo tables was
   transferred to it and the owner's own identity re-granted `SELECT` only, executed and verified
-  against the real workspace on 2026-09-19. **The repository side is not built yet** — there is no
-  checked-in grant script, `apply.yml` is still fake-backed, `RealUCClient` still has no
-  non-interactive authentication path, and `test_workflows_yaml.py` still asserts that no workflow
-  passes `--live`. See "What is not yet true" below; that gap is real and temporary, not rhetorical.
-  The real merge trigger remains blocked on a pending repository-push decision outside this ADR
+  against the real workspace on 2026-09-19. **The repository side is built too**, as of the same
+  day: `scripts/provision_ci_apply_identity.sh` recreates the whole arrangement from nothing and
+  was run live twice with byte-identical output; `.github/workflows/apply.yml` is wired to
+  `ucmeta apply --live --profile ucmeta-ci-apply`, gated fork-safe on three named GitHub secrets;
+  `RealUCClient` needed no authentication-path change at all (see "What was not yet true, and is
+  now closed" below for why); `tests/unit/test_workflows_yaml.py` now asserts `apply.yml`'s live path
+  is conditional on the credential and that no secret value is ever echoed, narrowed rather than
+  weakened for the two workflows where "never passes `--live`" still holds. The real merge trigger
+  remains blocked on a pending repository-push decision outside this ADR — the only thing left.
 - **Date:** 2026-09-19
 - **Decider:** hector
 - **Affects:** the live workspace's grants and ownership on `workspace.analytics.customers`,
   `workspace.analytics.orders` and `workspace.marketing.campaigns` (**already changed**);
-  `.github/workflows/apply.yml`, `src/uc_metadata/uc_client.py` (`RealUCClient`'s authentication
-  path), `tests/unit/test_workflows_yaml.py` and a new grant script under `scripts/` (**all still
-  to change**); `apply.py` and `release_log.py` explicitly unchanged
+  `.github/workflows/apply.yml`, `tests/unit/test_workflows_yaml.py` and
+  `scripts/provision_ci_apply_identity.sh` (**already changed**); `src/uc_metadata/uc_client.py`
+  explicitly unchanged — confirmed unnecessary, see "What was not yet true, and is now closed"
+  below; `apply.py` and `release_log.py` explicitly unchanged
 
 ## Context
 
@@ -220,33 +225,43 @@ anyone noticing they made it.
   exactly as they were. A broader revocation would have broken two other features to make a point
   this one already makes.
 
-### What is not yet true
+### What was not yet true, and is now closed
 
-Stated plainly, because this decision's own stated principle is that a permission applied by hand in
-a console and never written down makes the workspace unrebuildable — which is a worse defect than
-the one being fixed.
+Stated plainly at the time this ADR was first written, because this decision's own stated principle
+is that a permission applied by hand in a console and never written down makes the workspace
+unrebuildable — which is a worse defect than the one being fixed. Kept here, in the past tense,
+rather than deleted, because the gap and its closing are both part of the record.
 
-**The permission changes described above exist only as manual changes against the live workspace.
-They are not yet captured as a re-runnable script in this repository.** There is no grant script
-under `scripts/`; `apply.yml` still runs against `FakeUCClient` and is not wired to the service
-principal; `RealUCClient` still constructs its workspace client from a named local CLI profile and
-has no path for a non-interactive identity; and `tests/unit/test_workflows_yaml.py` still asserts
-that *no* workflow passes `--live`, an assertion this decision will deliberately make false for one
-of the three and which must be narrowed rather than deleted.
+**At first writing, the permission changes above existed only as manual changes against the live
+workspace, not yet captured as a re-runnable script in this repository.** There was no grant script
+under `scripts/`; `apply.yml` still ran against `FakeUCClient` and was not wired to the service
+principal; and `tests/unit/test_workflows_yaml.py` still asserted that *no* workflow passes
+`--live`. For that period, the workspace was **not** rebuildable from the repository — the single,
+temporary exception to the disposable-workspace rule ADR-004 and `seed_demo_data.sql` otherwise
+honour.
 
-For this one feature, therefore, the workspace is currently **not** rebuildable from the repository
-— the single exception, today, to the disposable-workspace rule ADR-004 and `seed_demo_data.sql`
-otherwise honour. That is a real, temporary gap for the next construction pass to close, not a
-detail to be described in the past tense before it is done.
+**All three are now built, the same day.** `scripts/provision_ci_apply_identity.sh` recreates the
+entire arrangement from nothing — idempotent service-principal creation, both entitlements,
+`USE_CATALOG`/`USE_SCHEMA`/warehouse `CAN_USE`, ownership transfer of the three tables, and the
+owner's `SELECT`-only re-grant — run live twice against the real workspace with byte-identical
+output. `.github/workflows/apply.yml` runs `ucmeta apply --live --profile ucmeta-ci-apply` when a
+CI apply credential is configured, and falls back to the in-repository fake, unmistakably, when it
+is not (SC-003-04). `tests/unit/test_workflows_yaml.py`'s no-`--live` assertion is narrowed to the
+two workflows where it still holds, and replaced for `apply.yml` with assertions that its live path
+is conditional on the credential and that no step ever echoes a secret value. The grant set, the
+identity, its expiry and its rotation procedure are documented in `docs/ci-service-principal.md`.
 
-The seam question that pass has to answer deliberately, rather than by accident: `RealUCClient`
-resolves an explicit CLI profile name that will not exist in CI. The cheaper, more reversible option
-is for the job to write a credentials-file profile of the expected name from its secrets before the
-run, so no production code changes at all and the local and CI code paths stay identical. The tidier
-long-term option is to give the client an authentication path that falls through to the
-environment's own credentials when no profile is named — better, but it touches the one module every
-other module depends on. The first is preferred; the second is the recorded follow-on if a second
-automation ever needs the same thing.
+**The seam question this section originally posed answered itself empirically, with no code
+change.** The predicted two options were: CI writes a credentials-file profile of the expected name
+before the job runs (no production code change), or `RealUCClient` grows a fallback authentication
+path when no profile is named (tidier, touches the one module every other module depends on). The
+first was not just preferred in the abstract — it was proven directly: a local profile named
+`ucmeta-ci` was hand-authenticated in `~/.databrickscfg`, and
+`ucmeta apply contracts/analytics/customers.yaml --live --profile ucmeta-ci` ran end-to-end as
+`ucmeta-ci-apply` against the real workspace, twice, with the second run byte-identical to the
+first. `RealUCClient.__init__(profile=...)` already accepts an arbitrary profile name; there was
+never a code seam to close, only a decision about which profile name CI's own credential-writing
+step should use. `uc_client.py` and `cli.py` remain unchanged by this decision.
 
 ### What this decision explicitly does not claim
 
