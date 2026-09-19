@@ -19,6 +19,7 @@ Design decisions live in [`docs/`](docs/) as ADRs:
 | [ADR-006](docs/ADR-006-two-tracks-for-change.md) | Two tracks for change: content edits vs. schema/tooling changes |
 | [ADR-007](docs/ADR-007-gate-provisioning-and-grants.md) | Gate provisioning and grants, not schema changes (the forcing function) |
 | [ADR-008](docs/ADR-008-coverage-history-and-native-dashboard.md) | Coverage history as a Unity Catalog table, with a native AI/BI dashboard over it |
+| [ADR-009](docs/ADR-009-ci-only-apply-a-machine-identity-and-a-tested-boundary.md) | CI-only apply: a machine identity for the write path, and a tested boundary on the human's |
 
 ## Problem
 
@@ -157,6 +158,13 @@ python dashboard/app.py /tmp/coverage_report.json -o /tmp/coverage.html
 holds a profile name and a host, never a secret. Set-up of that workspace is out of scope for this
 README — see ADR-004 and `scripts/seed_demo_data.sql`.
 
+**Note that `--live` apply no longer fully works from the author's own laptop, on purpose.** Since
+2026-09-19 the three demo tables are owned by a real service principal (`ucmeta-ci-apply`) and the
+author's personal identity holds `SELECT` on them and nothing else, so a local `ucmeta apply --live`
+returns `partial_failure`: the comment and property writes are refused by Unity Catalog naming the
+missing `MODIFY` privilege, while tag writes still land via a metastore-admin bypass that no grant
+can switch off. That split outcome — what is enforced, what is not, and why — is ADR-009.
+
 Also worth opening, because they are the artifacts rather than the prose:
 `contracts/analytics/customers.yaml` (the happy path), `contracts/marketing/campaigns.yaml`
 (well-covered but quality-red — fully reviewed, yet fails `validate()` because its `silver` claim
@@ -197,7 +205,13 @@ One call worth stating here rather than only in a workflow comment: the three CI
 submission, so a personal Databricks Free Edition credential has no business being a public-repo
 GitHub Actions secret — CI proves the gate *mechanism* (routing, exit codes, apply-on-merge) is
 real and reproducible for anyone who forks this repo; the live, `--live`-flagged loop against the
-real workspace is a local, human-run demonstration.
+real workspace is a local, human-run demonstration. That reasoning still holds for a *personal*
+credential and always will — but it is no longer the whole picture: a real, least-privileged service
+principal (`ucmeta-ci-apply`) now exists on the workspace and owns the three demo tables, which is
+the credential a live CI apply would use instead. Wiring `apply.yml` to it, and checking its grants
+in as a re-runnable script, is **not done yet** — the workflows genuinely still never pass `--live`
+today, and the permission changes currently exist only as manual changes against the live workspace.
+ADR-009 records that gap rather than describing it as finished.
 
 **AI-proposed content is verified working, deliberately not baked into the shipped contracts.**
 `ucmeta propose contracts/analytics/orders.yaml --live` was run for real on 2026-09-19 against a
