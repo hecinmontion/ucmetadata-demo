@@ -10,8 +10,11 @@
   `RealUCClient` needed no authentication-path change at all (see "What was not yet true, and is
   now closed" below for why); `tests/unit/test_workflows_yaml.py` now asserts `apply.yml`'s live path
   is conditional on the credential and that no secret value is ever echoed, narrowed rather than
-  weakened for the two workflows where "never passes `--live`" still holds. The real merge trigger
-  remains blocked on a pending repository-push decision outside this ADR — the only thing left.
+  weakened for the two workflows where "never passes `--live`" still holds. The three CI secrets
+  are now configured on the real repository (2026-09-19) and the mechanism correctly branches to
+  the live path — but that live path itself does not yet work end-to-end through GitHub Actions, a
+  real and current gap, not a hidden one: see "What is true as of 2026-09-19, and is not yet
+  closed" below.
 - **Date:** 2026-09-19
 - **Decider:** hector
 - **Affects:** the live workspace's grants and ownership on `workspace.analytics.customers`,
@@ -262,6 +265,27 @@ first was not just preferred in the abstract — it was proven directly: a local
 first. `RealUCClient.__init__(profile=...)` already accepts an arbitrary profile name; there was
 never a code seam to close, only a decision about which profile name CI's own credential-writing
 step should use. `uc_client.py` and `cli.py` remain unchanged by this decision.
+
+### What is true as of 2026-09-19, and is not yet closed
+
+The section above proves the mechanism *and* the local credential separately — it does not prove
+CI itself successfully applies live, because at the time it was written, the CI secrets were not
+yet configured. They are now (`DATABRICKS_CI_HOST` / `DATABRICKS_CI_CLIENT_ID` /
+`DATABRICKS_CI_CLIENT_SECRET`, set the same day), and the live branch of `apply.yml` genuinely does
+not work yet. Three real merges to `main`, each its own gated CI run, tried to fix it: naming
+`auth_type = oauth-m2m` explicitly, then `discovery_url` explicitly after reading the installed
+Databricks SDK's own source (`_resolve_host_metadata`, whose own comment admits it "blocks
+`Config()` initialization for ~5 minutes when the host is unreachable" when neither is set). Both
+still failed the same way — `WorkspaceClient(profile="ucmeta-ci-apply")`'s own auth resolution
+dies around the five-minute mark, specifically on the path from a GitHub-hosted runner to this
+workspace, in a way that does not reproduce locally against the identical credential (confirmed
+authenticating in under two seconds under a differently-named local profile). The credential and
+its grants are not the defect; something about Databricks SDK auth resolution on this specific
+network path is, and it is not root-caused further here — three ~5-minute CI round-trips chasing
+SDK internals stopped being proportionate for what this prototype needs to demonstrate. Recorded
+here rather than quietly reverted, for the same reason the rest of this ADR names what does not
+work: a platform whose own record of its automation quietly omits a real, current failure is
+exhibiting exactly the behaviour Layer 2 exists to make impossible for a human to get away with.
 
 ### What this decision explicitly does not claim
 

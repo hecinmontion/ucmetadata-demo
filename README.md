@@ -214,18 +214,33 @@ free, touch it rather than imitating it.*
 | Personal-data detection | **Mock, light** | AI proposal plus conservative name/value-shape masking. No compliance-grade classifier. |
 
 One call worth stating here rather than only in a workflow comment: `validate.yml` and
-`coverage.yml` always run `ucmeta` against `FakeUCClient`. `apply.yml` is different, and this is a
-real change since an earlier phase of this README: it is wired (ADR-009 Layer 1, `apply.yml`
-itself, `scripts/provision_ci_apply_identity.sh`) to apply live as `ucmeta-ci-apply` — a real,
-least-privileged service principal that owns three of the four demo tables — whenever
-`DATABRICKS_CI_HOST` / `DATABRICKS_CI_CLIENT_ID` / `DATABRICKS_CI_CLIENT_SECRET` are configured as
-repository secrets; without them (any fork, and this repository today — no such secrets are
-currently set on `hecinmontion/ucmetadata-demo`) it falls back to the exact same apply-on-merge
-mechanism against `FakeUCClient`, and which branch ran is unmistakable in the job's own printed
-output. A personal Databricks Free Edition credential still has no business being a public-repo
-secret, and this repository never uses one; the service-principal credential is the one that would
-ever be added, and adding it — turning this from "wired but dormant" into "live on every merge,"
-on a public repository anyone can open a PR against — is a deliberate, not-yet-made call.
+`coverage.yml` always run `ucmeta` against `FakeUCClient`. `apply.yml` is different: it is wired
+(ADR-009 Layer 1, `apply.yml` itself, `scripts/provision_ci_apply_identity.sh`) to apply live as
+`ucmeta-ci-apply` — a real, least-privileged service principal that owns three of the four demo
+tables — whenever `DATABRICKS_CI_HOST` / `DATABRICKS_CI_CLIENT_ID` / `DATABRICKS_CI_CLIENT_SECRET`
+are configured as repository secrets; without them (any fork) it falls back to the exact same
+apply-on-merge mechanism against `FakeUCClient`, and which branch ran is unmistakable in the job's
+own printed output.
+
+**Those three secrets are now configured on `hecinmontion/ucmetadata-demo` (2026-09-19), and the
+live branch genuinely does not work yet — a real, open gap, not a hidden one.** Three real merges
+to `main`, each gated by CI and each a genuine attempt (not a rehearsed sequence), tried to fix it:
+naming `auth_type = oauth-m2m` explicitly, then setting `discovery_url` explicitly after reading
+the installed Databricks SDK's own source (`_resolve_host_metadata`, which the SDK's own comment
+admits "blocks `Config()` initialization for ~5 minutes when the host is unreachable" when neither
+is set). Both attempts still failed the same way: a real live-apply run against
+`workspace.analytics.customers` dies around the five-minute mark inside `WorkspaceClient(profile=
+"ucmeta-ci-apply")`'s own auth resolution, on this specific GitHub-Actions-to-Free-Edition network
+path, in a way that does not reproduce locally against the same credential (confirmed working
+in under 2 seconds from a local machine). The credential is not the problem; something about
+Databricks SDK auth resolution specifically on a GitHub-hosted runner reaching this workspace is.
+Not root-caused further — three ~5-minute CI round-trips chasing SDK internals stopped being time
+well spent for this prototype, and the honest position is naming the gap plainly rather than a
+fourth guess. The service principal's own credential values are confirmed good: constructing a
+client from them locally, under a differently-named local profile (`ucmeta-ci`, not
+`ucmeta-ci-apply` — never tested under that exact name outside CI), authenticates in under two
+seconds. It is specifically something about auth resolution on a GitHub-hosted runner reaching
+this workspace, not the credential.
 
 **AI-proposed content is verified working, deliberately not baked into the shipped contracts.**
 `ucmeta propose contracts/analytics/orders.yaml --live` was run for real on 2026-09-19 against a
