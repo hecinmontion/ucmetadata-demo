@@ -88,6 +88,31 @@ jobs:
           } >> ~/.databrickscfg
           echo "Wrote a ucmeta-ci-apply OAuth M2M profile to ~/.databrickscfg (values not printed)."
 
+      # Temporary diagnostic (2026-09-19): the live-apply step below failed
+      # with "oauth-m2m: Invalid URL 'None': No scheme supplied" building
+      # WorkspaceClient(profile="ucmeta-ci-apply") -- discovery_url resolved
+      # to None even though the same three secret values work fine locally
+      # via the same code path under a differently-named local profile. This
+      # step prints only structural facts (lengths, whether host looks like a
+      # URL, resolved discovery_url) -- GitHub also auto-redacts any exact
+      # match against a registered secret value regardless. Removed once the
+      # root cause is found.
+      - name: Diagnose the CI apply profile (temporary)
+        if: steps.credential.outputs.configured == 'true'
+        run: |
+          uv run python3 -c "
+          from databricks.sdk.core import Config
+          cfg = Config(profile='ucmeta-ci-apply')
+          print('host repr:', repr(cfg.host))
+          print('host starts with https://:', str(cfg.host).startswith('https://') if cfg.host else None)
+          print('client_id len:', len(cfg.client_id) if cfg.client_id else None)
+          print('client_secret len:', len(cfg.client_secret) if cfg.client_secret else None)
+          try:
+              print('discovery_url:', cfg.discovery_url)
+          except Exception as e:
+              print('discovery_url raised:', type(e).__name__, e)
+          "
+
       # ---- changed-file discovery --------------------------------------------
       # Mechanism: `git diff --name-only <before>..<after>`, where `before`/
       # `after` come from the push event payload (github.event.before is the
