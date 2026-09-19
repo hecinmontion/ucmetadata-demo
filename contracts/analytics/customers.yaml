@@ -4,6 +4,13 @@
 # involved -- see README "What's mocked"). Descriptions, tags and properties on
 # this table were already applied live in a prior smoke test; this file is that
 # same content re-harvested and declared back into the contract.
+#
+# Also the dataset used to first prove apply.yml's live path for real: merging
+# a PR touching this file is what first ran `ucmeta apply --live` as
+# `ucmeta-ci-apply` via GitHub Actions (ADR-009 Layer 1), rather than only a
+# hand-authenticated local profile. Proven idempotent (docs/README's own
+# claim) -- the same COMMENT ON / SET TAGS / SET TBLPROPERTIES statements are
+# re-issued, nothing observable changes on a table already fully applied.
 version: 1
 dataset:
   qualifier:
