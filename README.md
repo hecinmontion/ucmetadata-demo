@@ -33,10 +33,14 @@ re-ingest a source that already exists, and cannot judge whether data is trustwo
 
 This prototype attacks the cause rather than the symptom, in three moves:
 
-1. **Put the metadata on the path the producer already walks.** A new dataset is not provisioned
-   without a valid contract, and no consumer read grant is issued for a dataset that has none.
-   Both are steps the platform genuinely owns, so authoring metadata stops being an extra errand
-   and becomes part of getting the thing the producer came for (ADR-007).
+1. **Put the metadata on the path the producer already walks.** The design: a new dataset should
+   not be provisioned without a valid contract, and no consumer read grant should be issued for a
+   dataset that has none — both are steps the platform genuinely owns, so authoring metadata stops
+   being an extra errand and becomes part of getting the thing the producer came for. What's
+   actually built in this codebase is the machine-readable verdict (`validate.py`) that gate would
+   call on every provisioning/grant request; wiring it into a real Terraform provisioning pipeline
+   is the target organisation's job, not this prototype's — ADR-007 names exactly where that
+   boundary sits, and the README's "What's mocked" table calls it out as described, not enforced.
 2. **Remove the blank-page cost.** An AI drafter proposes a description, a business-term link and
    a sensitivity classification for every column. It proposes; it never publishes (ADR-002).
 3. **Make the gap visible.** Coverage is computed and published per team, next to an outcome
@@ -51,8 +55,10 @@ detect-only is the honest position there.
 One human-readable contract file per dataset is the only authoring surface. Facts the catalogue
 already knows are harvested into it and never hand-typed; judgments are drafted by the AI, cleared
 by a named human, reviewed in a change request, and applied to the live catalogue only on merge.
-Two gates make that loop start at all (provisioning, grants) and two more make it safe (the
-unreviewed-marker refusal, and apply-on-merge-only). Everything is files, a five-verb CLI, and CI.
+Two gates are meant to make that loop start at all (provisioning, grants — the design ADR-007
+argues for, resting on a real verdict function but not yet wired into any real provisioning
+pipeline) and two more actually make it safe today (the unreviewed-marker refusal, and
+apply-on-merge-only, both enforced and demonstrated). Everything is files, a five-verb CLI, and CI.
 
 ```
                        ┌──────────────────────────────────────────────┐
@@ -78,26 +84,26 @@ unreviewed-marker refusal, and apply-on-merge-only). Everything is files, a five
                                    │ one outcome measure      │
                                    └──────────────────────────┘
 
-  FORCING FUNCTIONS (why the loop starts)      GATES (why it is safe)
-  · no contract  → no dataset provisioned      · any ai_proposed marker left → apply refuses,
-  · no contract  → no consumer read grant        whole contract, no partial writes
-    (both call validate()'s verdict)           · change requests may validate and dry-run,
-  · grandfathered estate: drift + coverage,      never apply; apply is wired to merge on main
-    never a retroactive block                  · every change request prints every planned write
-                                               · content edits take the fast path, schema/tooling
-                                                 changes the slow one — routed by file path,
-                                                 never argued per change request (ADR-006)
+  FORCING FUNCTIONS (design — not wired         GATES (why it is safe, today)
+  into a real gate in this repo; see below)     · any ai_proposed marker left → apply refuses,
+  · no contract  → no dataset provisioned         whole contract, no partial writes
+  · no contract  → no consumer read grant       · change requests may validate and dry-run,
+    (both would call validate()'s verdict —       never apply; apply is wired to merge on main
+     that verdict is real, the calling gate     · every change request prints every planned write
+     is not built — ADR-007)                    · content edits take the fast path, schema/tooling
+  · grandfathered estate: drift + coverage,       changes the slow one — routed by file path,
+    never a retroactive block                     never argued per change request (ADR-006)
 ```
 
 ## Quickstart
 
 No Databricks account and no API key are needed: every verb defaults to the in-repo fake
-catalogue (`FakeUCClient`), whose three fixture tables mirror the live workspace's schemas
+catalogue (`FakeUCClient`), whose fixture tables mirror the live workspace's schemas
 exactly. `propose` is the one exception — it makes a real AI call — and it is clearly marked below.
 
 ```bash
-git clone https://github.com/<owner>/uc-metadata-platform.git
-cd uc-metadata-platform
+git clone https://github.com/hecinmontion/ucmetadata-demo.git
+cd ucmetadata-demo
 
 # Set up the environment — pick ONE of the two options below.
 
@@ -159,18 +165,26 @@ holds a profile name and a host, never a secret. Set-up of that workspace is out
 README — see ADR-004 and `scripts/seed_demo_data.sql`.
 
 **Note that `--live` apply no longer fully works from the author's own laptop, on purpose.** Since
-2026-09-19 the three demo tables are owned by a real service principal (`ucmeta-ci-apply`) and the
-author's personal identity holds `SELECT` on them and nothing else, so a local `ucmeta apply --live`
-returns `partial_failure`: the comment and property writes are refused by Unity Catalog naming the
-missing `MODIFY` privilege, while tag writes still land via a metastore-admin bypass that no grant
-can switch off. That split outcome — what is enforced, what is not, and why — is ADR-009.
+2026-09-19 three of the four demo tables (`customers`, `orders`, `campaigns` — see
+`scripts/provision_ci_apply_identity.sh`) are owned by a real service principal
+(`ucmeta-ci-apply`) and the author's personal identity holds `SELECT` on them and nothing else, so
+a local `ucmeta apply --live` against any of those three returns `partial_failure`: the comment and
+property writes are refused by Unity Catalog naming the missing `MODIFY` privilege, while tag
+writes still land via a metastore-admin bypass that no grant can switch off. That split outcome —
+what is enforced, what is not, and why — is ADR-009. `marketing.leads` (added after that
+provisioning script was written) is the one demo table this boundary does **not** yet cover — it is
+still owned by the author's own identity, a known, not-yet-closed gap rather than an oversight (the
+fix is re-running the provisioning script with a fourth table name added to its list).
 
 Also worth opening, because they are the artifacts rather than the prose:
 `contracts/analytics/customers.yaml` (the happy path), `contracts/marketing/campaigns.yaml`
 (well-covered but quality-red — fully reviewed, yet fails `validate()` because its `silver` claim
 outruns its own DQ evidence), `contracts/analytics/orders.yaml` (grandfathered, still failing
-validation for a different reason — genuinely pre-review), `change_classes.yaml` (the two-track
-declaration) and `release_log.jsonl`.
+validation for a different reason — genuinely pre-review), `contracts/marketing/leads.yaml` (the
+opposite extreme from `orders`: never harvested until this write-up, still carrying every
+placeholder harvest left it with — the lowest-scoring dataset coverage shows, and the concrete
+example behind the "can fill rate ever be 0%?" question answered below), `change_classes.yaml` (the
+two-track declaration) and `release_log.jsonl`.
 
 ## What's mocked
 
@@ -189,7 +203,7 @@ free, touch it rather than imitating it.*
 | `apply.py` | **Real, real target** | Table comment, column comments, tags, properties. Idempotency and revert-restores proven against live Unity Catalog. |
 | `release_log.py` | **Mock writer, real interface, really wired** | Every apply appends a record. The writer is a local `release_log.jsonl`; the production adapter swaps the writer, not the record's shape. |
 | `coverage.py` + `dashboard/app.py` | **Real, minimal** | Fill rate per dimension and team, computed not described. Rendered as a static generated page — no served app to fail live. The static page is unchanged and stays zero-credential (spec F-PLATFORM-002 SC-002-03, mechanically enforced by a test). |
-| `coverage_history.py` + `dashboards/coverage.lvdash.json` (**ADR-008**) | **Real, both halves built** | The point-in-time report is now also durable: `workspace.platform.coverage_history`, one row per dataset per run, appended (never `UPDATE`d/`DELETE`d) via `ucmeta coverage --publish-history`, off by default. Bootstrapped by `scripts/bootstrap_coverage_history.sql`, confirmed live with two real runs landing six rows. A native AI/BI Dashboard queries that table — built by iterating against the live `lakeview` API (ADR-008's chosen route), created and published against the real workspace with zero errors, redeployable via `scripts/deploy_coverage_dashboard.sh`. Honest limit: that proves the definition is valid and queryable, not that it visually renders correctly — see `dashboards/README.md`. |
+| `coverage_history.py` + `dashboards/coverage.lvdash.json` (**ADR-008**) | **Real, both halves built** | The point-in-time report is now also durable: `workspace.platform.coverage_history`, one row per dataset per run, appended (never `UPDATE`d/`DELETE`d) via `ucmeta coverage --publish-history`, off by default. Bootstrapped by `scripts/bootstrap_coverage_history.sql`, confirmed live with real runs. A native AI/BI Dashboard queries that table — built by iterating against the live `lakeview` API (ADR-008's chosen route), created and published against the real workspace with zero errors, redeployable via `scripts/deploy_coverage_dashboard.sh`. All four widgets are confirmed rendering correctly in the browser. One honest scar: a `table` widget for "coverage by dataset" went through two API-accepted, hand-guessed column-schema definitions that both still failed to render — "Invalid widget definition is imported" — so it was rebuilt by hand through the workspace's own dashboard editor as a bar chart instead, then re-exported from the live dashboard back into `coverage.lvdash.json` to keep the file as source of truth. See `dashboards/README.md`. |
 | Outcome measure | **Simulated, labelled** | Computed from `sample_outcome_events.yaml`; every measure carries `simulated=True` and a caveat naming the fixture, so no caller can present it as observed. |
 | `owner_registry.py` | **Mock behind a seam** | `resolve_owner(ba_id) -> Owner` over four hard-coded entries. Contracts store only the business-application id pointer, never a copied owner string. |
 | `glossary/terms.yaml` + `glossary.py` | **Mock data, real grounding** | Twelve sample terms, loaded and passed to the drafter as context; a proposed term link is dropped unless it resolves to a real entry. At this size the whole glossary fits in the prompt, so there is no retrieval ranking to speak of — that would be the next step at real glossary scale. |
@@ -199,19 +213,19 @@ free, touch it rather than imitating it.*
 | Provisioning / grant gates | **Described, on a real check** | The gates belong to the target organisation's platform. What is built is the machine-readable verdict they would call. |
 | Personal-data detection | **Mock, light** | AI proposal plus conservative name/value-shape masking. No compliance-grade classifier. |
 
-One call worth stating here rather than only in a workflow comment: the three CI workflows under
-`.github/workflows/` (`validate.yml`, `apply.yml`, `coverage.yml`) always run `ucmeta` against
-`FakeUCClient`, never with `--live`. This is a public repo demonstrating a real interview
-submission, so a personal Databricks Free Edition credential has no business being a public-repo
-GitHub Actions secret — CI proves the gate *mechanism* (routing, exit codes, apply-on-merge) is
-real and reproducible for anyone who forks this repo; the live, `--live`-flagged loop against the
-real workspace is a local, human-run demonstration. That reasoning still holds for a *personal*
-credential and always will — but it is no longer the whole picture: a real, least-privileged service
-principal (`ucmeta-ci-apply`) now exists on the workspace and owns the three demo tables, which is
-the credential a live CI apply would use instead. Wiring `apply.yml` to it, and checking its grants
-in as a re-runnable script, is **not done yet** — the workflows genuinely still never pass `--live`
-today, and the permission changes currently exist only as manual changes against the live workspace.
-ADR-009 records that gap rather than describing it as finished.
+One call worth stating here rather than only in a workflow comment: `validate.yml` and
+`coverage.yml` always run `ucmeta` against `FakeUCClient`. `apply.yml` is different, and this is a
+real change since an earlier phase of this README: it is wired (ADR-009 Layer 1, `apply.yml`
+itself, `scripts/provision_ci_apply_identity.sh`) to apply live as `ucmeta-ci-apply` — a real,
+least-privileged service principal that owns three of the four demo tables — whenever
+`DATABRICKS_CI_HOST` / `DATABRICKS_CI_CLIENT_ID` / `DATABRICKS_CI_CLIENT_SECRET` are configured as
+repository secrets; without them (any fork, and this repository today — no such secrets are
+currently set on `hecinmontion/ucmetadata-demo`) it falls back to the exact same apply-on-merge
+mechanism against `FakeUCClient`, and which branch ran is unmistakable in the job's own printed
+output. A personal Databricks Free Edition credential still has no business being a public-repo
+secret, and this repository never uses one; the service-principal credential is the one that would
+ever be added, and adding it — turning this from "wired but dormant" into "live on every merge,"
+on a public repository anyone can open a PR against — is a deliberate, not-yet-made call.
 
 **AI-proposed content is verified working, deliberately not baked into the shipped contracts.**
 `ucmeta propose contracts/analytics/orders.yaml --live` was run for real on 2026-09-19 against a
@@ -310,6 +324,13 @@ choices, marked as such.
 - **A discovery or search experience.** Nothing at all, not even a stub page. Discovery is the
   downstream consumer of good metadata, not this feature; a half-built discovery surface would cost
   walkthrough time and invite questions about a layer this prototype is not arguing about.
+- **Catalogue-wide discovery of uncontracted tables.** `UCClient` has no `list_tables`/`list_catalogs`
+  method — every verb takes an already-known `catalog.schema.table` name, and `coverage.py` only
+  ever reads `contracts/`. A table that exists in Unity Catalog with no contract file is therefore
+  completely invisible to this tool: not counted, not flagged, not in any report — the two-speed
+  rollout's "grandfathered but visible" story (ADR-007) only covers tables someone already chose to
+  harvest. Closing this is a real, named gap (a `ucmeta scan --live` reconciliation verb that diffs
+  a live catalogue listing against `contracts/`), not a design decision — it just is not built.
 - **A prompt-injection test against the drafter.** A hostile column comment or sample value trying
   to steer the proposal is cheap to test and genuinely worth testing. It was deprioritised against
   the core loop, not judged unimportant. The structural defence that *is* present is that the
