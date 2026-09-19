@@ -73,19 +73,21 @@ jobs:
       # to make that profile exist before the job runs. Only ever runs when
       # step `credential` found all three secrets present; never prints their
       # values, only that the file was written.
-      # `auth_type = oauth-m2m` is a deliberate, load-bearing line, not
-      # boilerplate: without it, the first live-apply run (PR #4) showed the
-      # Databricks SDK spends its first five minutes probing the workspace's
-      # `.well-known/databricks-config` host-metadata endpoint to guess which
-      # auth strategy to use from host+client_id+client_secret alone -- a
-      # probe that hangs to its full timeout on this runner network rather
-      # than failing fast the way it apparently does locally -- before ever
-      # falling back to the explicit fields, and even then discovery_url
-      # still resolved to None. Naming the auth type explicitly skips that
-      # probe entirely; this is the documented way to do that, not a guess
-      # (confirmed against a temporary diagnostic step run in this same job,
-      # since credential handling here means we can't safely replay this
-      # locally against a second copy of the secret).
+      # `discovery_url` is the real fix for a genuine SDK-level hang, found
+      # by reading databricks/sdk/config.py directly (site-packages, this
+      # exact installed version) after two wrong guesses cost ~10 minutes of
+      # real CI time each: `_resolve_host_metadata()` always probes the
+      # workspace's own `/.well-known/databricks-config` endpoint before
+      # falling back to explicit config, UNLESS `discovery_url` is already
+      # set -- its own comment says as much: "otherwise it uses the default
+      # 300s retry budget, which blocks Config() initialization for ~5
+      # minutes when the host is unreachable." Adding `auth_type = oauth-m2m`
+      # alone (a prior attempt on this branch's history) did not skip this --
+      # only a pre-set discovery_url does, per the source. The value is the
+      # standard Databricks OIDC discovery path for this host, not a secret:
+      # `<host>/oidc/.well-known/oauth-authorization-server`, confirmed
+      # correct by a local diagnostic against this exact workspace before
+      # ever being written here.
       - name: Write the CI apply Databricks profile
         if: steps.credential.outputs.configured == 'true'
         env:
@@ -99,6 +101,7 @@ jobs:
             echo "client_id = ${DATABRICKS_CI_CLIENT_ID}"
             echo "client_secret = ${DATABRICKS_CI_CLIENT_SECRET}"
             echo "auth_type = oauth-m2m"
+            echo "discovery_url = ${DATABRICKS_CI_HOST}/oidc/.well-known/oauth-authorization-server"
           } >> ~/.databrickscfg
           echo "Wrote a ucmeta-ci-apply OAuth M2M profile to ~/.databrickscfg (values not printed)."
 

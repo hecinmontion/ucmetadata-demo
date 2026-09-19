@@ -5,12 +5,13 @@
 # this table were already applied live in a prior smoke test; this file is that
 # same content re-harvested and declared back into the contract.
 #
-# Also the dataset used to first prove apply.yml's live path for real. The
-# first attempt (PR #4) actually surfaced a genuine bug in that path: the
-# Databricks SDK's auth-strategy auto-probe hung for its full five-minute
-# timeout on the GitHub Actions runner network before ever reaching this
-# table. Fixed by naming `auth_type = oauth-m2m` explicitly in the written
-# profile (see apply.yml). This touch re-triggers that now-fixed path.
+# Also the dataset used to first prove apply.yml's live path for real. Took
+# three attempts to actually land: PR #4 surfaced the SDK's host-metadata
+# probe hanging its full 5-minute timeout on the runner network; a first
+# fix attempt (auth_type alone) didn't change that, confirmed by a second
+# failed run; setting discovery_url explicitly (see apply.yml) was the real
+# fix, verified locally against the real workspace before this third
+# attempt. This touch re-triggers the now-actually-fixed path.
 # Proven idempotent (docs/README's own claim) -- the same COMMENT ON / SET
 # TAGS / SET TBLPROPERTIES statements are re-issued, nothing observable
 # changes on a table already fully applied.
