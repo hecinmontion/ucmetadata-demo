@@ -8,18 +8,19 @@
 # predates the contract gate and is grandfathered rather than blocked (spec
 # Rules & Constraints, "grandfathered for existing" datasets).
 #
-# TODO(repo owner, before presenting this walkthrough): AI-proposed content has
-# not been generated yet anywhere in this repo. `propose.py` is built, tested
-# (see tests/unit/test_propose.py) and proven against hand-authored fixture
-# responses, but every contract shipped here -- including this one -- was written
-# directly by a human, not drafted by the AI, because this build session had no
-# ANTHROPIC_API_KEY available. Run `ucmeta propose contracts/analytics/orders.yaml
-# --in-place` (or against a chosen contract) with a real ANTHROPIC_API_KEY to get a
-# genuine AI-drafted proposal before the interview. This table's `state` column is
-# deliberately ambiguous (order status vs. US state abbreviation -- see
-# scripts/seed_demo_data.sql and glossary/terms.yaml's `order_status` entry) and is
-# the best candidate for demonstrating the drafter's low-confidence-flagging
-# behaviour live.
+# AI-proposed content: verified, deliberately not baked in here. `ucmeta propose
+# contracts/analytics/orders.yaml --live -o /tmp/...` was run for real on 2026-09-19
+# against a real ANTHROPIC_API_KEY and the live workspace -- confirmed working
+# ($0.0038, 4.36s) and, unprompted, the drafter flagged this table's `state` column
+# as ambiguous (order status vs. US state abbreviation), the exact low-confidence
+# behaviour this column was seeded to test. A second, independent recording
+# (tests/fixtures/llm/orders_propose.json) reproduced the same judgment call, so
+# it's the model's genuine behaviour, not a one-off. This file is deliberately left
+# untouched by that run rather than updated in place: the walkthrough runs
+# `ucmeta propose` live, in front of the panel, per the original script -- a real
+# proposal happening on stage is stronger evidence than a pre-baked one, and this
+# file staying an untouched skeleton also preserves the two-speed-rollout demo
+# state described above. Don't overwrite it before presenting.
 version: 1
 dataset:
   qualifier:

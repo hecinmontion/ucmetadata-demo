@@ -34,7 +34,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 TABLE = "workspace.analytics.customers"
 KNOWN_BA_ID = "BA-10231"
 APPROVER = "hector"
-CUSTOMERS_FIXTURE = "customers_propose__PLACEHOLDER_NOT_RECORDED"
+CUSTOMERS_FIXTURE = "customers_propose"
 
 
 def _fully_reviewed_contract(client, full_name: str = TABLE) -> Contract:

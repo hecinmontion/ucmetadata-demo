@@ -1,0 +1,28 @@
+{
+  "container": null,
+  "content": [
+    {
+      "text": "{\"columns\":[{\"column_name\":\"order_id\",\"description\":\"Unique identifier for a single purchase transaction.\",\"business_term\":\"order\",\"pii\":false,\"sensitivity\":\"internal\"},{\"column_name\":\"customer_id\",\"description\":\"Unique identifier for the customer who placed the order.\",\"business_term\":\"customer\",\"pii\":false,\"sensitivity\":\"internal\"},{\"column_name\":\"state\",\"description\":\"The current lifecycle state of the order (e.g. pending, shipped, refunded).\",\"business_term\":\"order_status\",\"pii\":false,\"sensitivity\":\"internal\",\"note\":\"Column name 'state' is ambiguous: samples contain both order statuses (shipped, pending, refunded) and US state abbreviations (CA, NY). Based on the prevalence of order lifecycle values, this is interpreted as order_status, but human review is recommended to confirm the column's actual semantic meaning.\"},{\"column_name\":\"amount\",\"description\":\"The total monetary value of this order in USD, inclusive of any discounts already applied.\",\"business_term\":\"amount\",\"pii\":false,\"sensitivity\":\"internal\"},{\"column_name\":\"order_ts\",\"description\":\"The timestamp when the order was placed.\",\"business_term\":null,\"pii\":false,\"sensitivity\":\"internal\"},{\"column_name\":\"channel\",\"description\":\"The marketing or sales route through which the order was placed (e.g. web, mobile, email, social).\",\"business_term\":\"channel\",\"pii\":false,\"sensitivity\":\"internal\"}],\"dataset_sensitivity\":\"internal\",\"dataset_sensitivity_note\":\"All columns contain order and transactional data without personally identifiable information. No customer email, names, or explicit PII fields are present. The dataset is sensitive at the internal level due to its business value and transactional nature, but does not require higher classification.\"}",
+      "type": "text"
+    }
+  ],
+  "id": "msg_011CfCpaGQGD4HigSNhdtGsw",
+  "model": "claude-haiku-4-5-20251001",
+  "role": "assistant",
+  "stop_details": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "inference_geo": "not_available",
+    "input_tokens": 1803,
+    "output_tokens": 393,
+    "service_tier": "standard"
+  }
+}

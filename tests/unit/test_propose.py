@@ -1,9 +1,13 @@
 """Happy-path tests for `propose.py`, against `llm_fixture_transport`'s
-fixture-backed replay client -- offline, deterministic, and (today) built
-against hand-authored placeholder fixtures because this environment has no
-`ANTHROPIC_API_KEY` (see `tests/fixtures/llm/README.md`). One `llm_live`-marked
-test at the bottom is the real recording pass, correctly written and ready to
-run once a key is available, but skipped by default.
+fixture-backed replay client -- offline, deterministic, and built against real
+recorded Anthropic responses (see `tests/fixtures/llm/README.md`). The three
+`llm_live`-marked tests at the bottom are the recording passes themselves,
+skipped by default; each was run for real on 2026-09-19 against a live
+`ANTHROPIC_API_KEY`, including a live CLI run against the real workspace, and
+the orders recording independently reproduced the same `state`-column
+ambiguity-flagging behaviour (order status vs. US state abbreviation) seen in
+the live run -- confirming it is the model's genuine judgment, not a scripted
+fixture.
 
 Covers SC-001-01's "AI proposes the missing fields" step: harvest, then
 propose, populates every blank judgment field as an AI-proposed, unreviewed
@@ -26,9 +30,9 @@ from uc_metadata.harvest import harvest
 from uc_metadata.models import Sensitivity
 from uc_metadata.propose import propose
 
-CUSTOMERS_FIXTURE = "customers_propose__PLACEHOLDER_NOT_RECORDED"
-CAMPAIGNS_FIXTURE = "campaigns_propose__PLACEHOLDER_NOT_RECORDED"
-ORDERS_FIXTURE = "orders_propose__PLACEHOLDER_NOT_RECORDED"
+CUSTOMERS_FIXTURE = "customers_propose"
+CAMPAIGNS_FIXTURE = "campaigns_propose"
+ORDERS_FIXTURE = "orders_propose"
 
 
 def _harvested_contract(table: str, business_application_id: str):
@@ -325,6 +329,44 @@ def test_propose_records_a_real_customers_fixture():
     """
     contract = _harvested_contract("workspace.analytics.customers", "BA-10231")
     llm_client = build_llm_client(CUSTOMERS_FIXTURE)
+
+    result = propose(contract, FakeUCClient(), llm_client=llm_client)
+
+    assert result.contract.dataset.sensitivity is not None
+    assert result.metrics.input_tokens > 0
+    assert result.metrics.output_tokens > 0
+
+
+@pytest.mark.llm_live
+@pytest.mark.skipif(
+    not (LLM_LIVE_TESTS_ENABLED and os.environ.get("ANTHROPIC_API_KEY")),
+    reason="set LLM_LIVE_TESTS=1 and ANTHROPIC_API_KEY to record a real fixture against the live Anthropic API",
+)
+def test_propose_records_a_real_campaigns_fixture():
+    """Same recording pass as the customers test, for the campaigns fixture."""
+    contract = _harvested_contract("workspace.marketing.campaigns", "BA-20144")
+    llm_client = build_llm_client(CAMPAIGNS_FIXTURE)
+
+    result = propose(contract, FakeUCClient(), llm_client=llm_client)
+
+    assert result.contract.dataset.sensitivity is not None
+    assert result.metrics.input_tokens > 0
+    assert result.metrics.output_tokens > 0
+
+
+@pytest.mark.llm_live
+@pytest.mark.skipif(
+    not (LLM_LIVE_TESTS_ENABLED and os.environ.get("ANTHROPIC_API_KEY")),
+    reason="set LLM_LIVE_TESTS=1 and ANTHROPIC_API_KEY to record a real fixture against the live Anthropic API",
+)
+def test_propose_records_a_real_orders_fixture():
+    """Same recording pass, for the orders fixture -- the table with the
+    deliberately ambiguous `state` column. A real run against the live workspace
+    (see the walkthrough) already confirmed the drafter flags this column's
+    ambiguity unprompted; this records that same behaviour as a fixture so the
+    offline suite exercises it too, not just a live demo run."""
+    contract = _harvested_contract("workspace.analytics.orders", "BA-30587")
+    llm_client = build_llm_client(ORDERS_FIXTURE)
 
     result = propose(contract, FakeUCClient(), llm_client=llm_client)
 

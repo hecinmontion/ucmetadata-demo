@@ -1,0 +1,28 @@
+{
+  "container": null,
+  "content": [
+    {
+      "text": "{\"columns\": [{\"column_name\": \"campaign_id\", \"description\": \"Unique identifier for the marketing campaign\", \"business_term\": \"campaign\", \"pii\": false, \"sensitivity\": \"internal\"}, {\"column_name\": \"name\", \"description\": \"The name or title of the marketing campaign\", \"business_term\": \"campaign\", \"pii\": false, \"sensitivity\": \"internal\"}, {\"column_name\": \"channel\", \"description\": \"The marketing channel through which the campaign is executed (e.g. email, social, search)\", \"business_term\": \"channel\", \"pii\": false, \"sensitivity\": \"internal\"}, {\"column_name\": \"budget\", \"description\": \"The approved spend amount for the campaign in USD, fixed at creation\", \"business_term\": \"budget\", \"pii\": false, \"sensitivity\": \"internal\"}, {\"column_name\": \"start_date\", \"description\": \"The calendar date when the campaign begins\", \"business_term\": \"campaign\", \"pii\": false, \"sensitivity\": \"internal\"}, {\"column_name\": \"end_date\", \"description\": \"The calendar date when the campaign ends\", \"business_term\": \"campaign\", \"pii\": false, \"sensitivity\": \"internal\"}, {\"column_name\": \"active\", \"description\": \"Boolean flag indicating whether the campaign is currently active\", \"business_term\": null, \"pii\": false, \"sensitivity\": \"internal\"}], \"dataset_sensitivity\": \"internal\", \"dataset_sensitivity_note\": \"No PII present; all columns are standard campaign metadata used for internal planning and reporting.\"}",
+      "type": "text"
+    }
+  ],
+  "id": "msg_011CfCpa4MDxy88KfnwPDAiv",
+  "model": "claude-haiku-4-5-20251001",
+  "role": "assistant",
+  "stop_details": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "inference_geo": "not_available",
+    "input_tokens": 1835,
+    "output_tokens": 355,
+    "service_tier": "standard"
+  }
+}

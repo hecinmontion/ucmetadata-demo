@@ -1,0 +1,28 @@
+{
+  "container": null,
+  "content": [
+    {
+      "text": "{\"columns\": [{\"column_name\": \"customer_id\", \"description\": \"Unique identifier for a customer account on the platform.\", \"business_term\": \"customer\", \"pii\": false, \"sensitivity\": \"internal\"}, {\"column_name\": \"email\", \"description\": \"Customer's primary electronic contact address, used for account communication and order confirmations.\", \"business_term\": \"email\", \"pii\": true, \"sensitivity\": \"strictly_confidential\"}, {\"column_name\": \"first_name\", \"description\": \"Customer's given name.\", \"business_term\": null, \"pii\": true, \"sensitivity\": \"strictly_confidential\"}, {\"column_name\": \"last_name\", \"description\": \"Customer's family name.\", \"business_term\": null, \"pii\": true, \"sensitivity\": \"strictly_confidential\"}, {\"column_name\": \"region\", \"description\": \"Coarse geographic market the customer is associated with, used for regional reporting and routing.\", \"business_term\": \"region\", \"pii\": false, \"sensitivity\": \"internal\"}, {\"column_name\": \"signup_date\", \"description\": \"Calendar date the customer's account was created.\", \"business_term\": \"signup_date\", \"pii\": false, \"sensitivity\": \"internal\"}, {\"column_name\": \"lifetime_value\", \"description\": \"Total historical revenue attributed to the customer across all of their orders to date, in USD.\", \"business_term\": \"lifetime_value\", \"pii\": false, \"sensitivity\": \"confidential\"}], \"dataset_sensitivity\": \"strictly_confidential\", \"dataset_sensitivity_note\": \"Dataset contains multiple PII columns (email, first_name, last_name) that warrant strict confidentiality classification at the dataset level.\"}",
+      "type": "text"
+    }
+  ],
+  "id": "msg_011CfCpZqeV2ZxUxw5H2q2Pe",
+  "model": "claude-haiku-4-5-20251001",
+  "role": "assistant",
+  "stop_details": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "type": "message",
+  "usage": {
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "inference_geo": "not_available",
+    "input_tokens": 1849,
+    "output_tokens": 391,
+    "service_tier": "standard"
+  }
+}

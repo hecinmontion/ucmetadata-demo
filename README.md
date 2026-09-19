@@ -199,16 +199,16 @@ GitHub Actions secret — CI proves the gate *mechanism* (routing, exit codes, a
 real and reproducible for anyone who forks this repo; the live, `--live`-flagged loop against the
 real workspace is a local, human-run demonstration.
 
-**AI-proposed content has not been generated yet in this repo.** `propose.py` is built, tested
-(see `tests/unit/test_propose.py`), and proven against hand-authored fixture responses, but every
-contract shipped under `contracts/` was written directly by a human, not drafted by the AI — this
-build session ran with no `ANTHROPIC_API_KEY` available, and fabricating what a model "would have
-said" into an `ai_proposed: true` field would be worse than leaving the field human-authored.
-Before presenting this walkthrough, run `ucmeta propose contracts/analytics/orders.yaml
---in-place` (or against a chosen contract) with a real `ANTHROPIC_API_KEY` to get a genuine
-AI-drafted proposal — `orders.state` is deliberately ambiguous (order status vs. US state
-abbreviation) and is the best candidate for demonstrating the drafter's low-confidence-flagging
-behaviour live. This is a real, unclosed loop, not a completed part of the build.
+**AI-proposed content is verified working, deliberately not baked into the shipped contracts.**
+`ucmeta propose contracts/analytics/orders.yaml --live` was run for real on 2026-09-19 against a
+real `ANTHROPIC_API_KEY` and the live workspace ($0.0038, 4.36s) — the drafter, unprompted, flagged
+`orders.state` as ambiguous (order status vs. US state abbreviation), the exact low-confidence
+behaviour that column was seeded to test. A second, independent recording
+(`tests/fixtures/llm/orders_propose.json`) reproduced the same judgment call, so this is the
+model's genuine behaviour, not a scripted demo. Every contract shipped under `contracts/` still
+stays human-authored rather than being overwritten with that output: the walkthrough runs
+`ucmeta propose` live, in front of the panel, per the original script — real proposal on stage
+beats pre-baked in the repo.
 
 Three further gaps were named here in an earlier phase and are now closed, worth recording rather
 than quietly deleting:
