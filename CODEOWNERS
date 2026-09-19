@@ -11,13 +11,21 @@
 # accounts -- see owner_registry.py's own docstring for what a production
 # mapping would resolve against instead (an Entra ID / identity-provider
 # group per business-application id, not a hand-maintained file like this
-# one). What this file does NOT express: the second, distinct approver
-# Rules & Constraints requires for sensitivity/PII changes -- CODEOWNERS
-# alone can name required reviewers per path, but a genuine "two different
-# humans must approve" gate needs a branch-protection rule
-# (Require approval of the most recent reviewable push) layered on top,
-# which is a repo-settings concern, not something a file in this repo can
-# configure declaratively.
+# one). Because of that, `hecinmontion/ucmetadata-demo`'s real branch
+# protection on `main` cannot require review *from these specific owners* --
+# none of them are real GitHub accounts capable of approving anything, and
+# the repository's only real collaborator is its own author, so requiring
+# review at all (from anyone) would deadlock every future merge. What's
+# actually turned on instead (2026-09-20): a pull request is required before
+# merging, and the `validate` check must pass -- enforced even for the
+# repository admin, no bypass. This file still does its real job of
+# *routing* which path a change takes (ADR-006); it just isn't the thing a
+# GitHub setting can point at to require a specific human's approval, in
+# this particular solo repository. What this file does NOT express: the
+# second, distinct approver Rules & Constraints requires for sensitivity/PII
+# changes -- CODEOWNERS alone can name required reviewers per path, but a
+# genuine "two different humans must approve" gate needs a real second
+# reviewer to exist, which this repository does not have.
 
 # Default: unmatched paths fall to the platform team.
 *                                       @data-platform-team
@@ -26,6 +34,7 @@
 /contracts/analytics/customers.yaml    @priya-natarajan
 /contracts/analytics/orders.yaml       @grace-okafor
 /contracts/marketing/campaigns.yaml    @marco-silva
+/contracts/marketing/leads.yaml        @marco-silva
 
 # Schema and tooling -- slow path (ADR-006): the platform team owns the
 # contract shape, the CLI, CI, and everything the design depends on, per

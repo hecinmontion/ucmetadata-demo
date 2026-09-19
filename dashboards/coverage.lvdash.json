@@ -66,7 +66,7 @@
           "position": {
             "x": 0,
             "y": 0,
-            "width": 2,
+            "width": 4,
             "height": 3
           }
         },
@@ -104,89 +104,10 @@
             }
           },
           "position": {
-            "x": 2,
+            "x": 4,
             "y": 0,
-            "width": 2,
-            "height": 3
-          }
-        },
-        {
-          "widget": {
-            "name": "w_current_table",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "ds_current",
-                  "fields": [
-                    {
-                      "name": "full_name",
-                      "expression": "`full_name`"
-                    },
-                    {
-                      "name": "team",
-                      "expression": "`team`"
-                    },
-                    {
-                      "name": "dataset_fill_rate",
-                      "expression": "`dataset_fill_rate`"
-                    },
-                    {
-                      "name": "certification_tier",
-                      "expression": "`certification_tier`"
-                    },
-                    {
-                      "name": "certification_supported_by_evidence",
-                      "expression": "`certification_supported_by_evidence`"
-                    }
-                  ],
-                  "disaggregated": true
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "table",
-              "encodings": {
-                "columns": [
-                  {
-                    "fieldName": "full_name",
-                    "displayName": "Dataset",
-                    "type": "string"
-                  },
-                  {
-                    "fieldName": "team",
-                    "displayName": "Team",
-                    "type": "string"
-                  },
-                  {
-                    "fieldName": "dataset_fill_rate",
-                    "displayName": "Fill rate",
-                    "type": "float"
-                  },
-                  {
-                    "fieldName": "certification_tier",
-                    "displayName": "Certification",
-                    "type": "string"
-                  },
-                  {
-                    "fieldName": "certification_supported_by_evidence",
-                    "displayName": "Evidence supports tier?",
-                    "type": "boolean"
-                  }
-                ]
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Coverage by dataset (latest run)"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 3,
             "width": 4,
-            "height": 6
+            "height": 3
           }
         },
         {
@@ -239,12 +160,81 @@
           "position": {
             "x": 0,
             "y": 9,
-            "width": 4,
+            "width": 8,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "2a3cb356",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_current",
+                  "fields": [
+                    {
+                      "name": "team",
+                      "expression": "`team`"
+                    },
+                    {
+                      "name": "avg(dataset_fill_rate)",
+                      "expression": "AVG(`dataset_fill_rate`)"
+                    },
+                    {
+                      "name": "full_name",
+                      "expression": "`full_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Dataset fill rate by dataset"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "avg(dataset_fill_rate)",
+                  "displayName": "Fill rate",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "full_name",
+                  "displayName": "Dataset",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "color": {
+                  "fieldName": "team",
+                  "displayName": "Team",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 8,
             "height": 6
           }
         }
       ],
-      "pageType": "PAGE_TYPE_CANVAS"
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
     }
   ],
   "uiSettings": {

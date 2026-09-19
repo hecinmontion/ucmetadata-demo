@@ -17,18 +17,19 @@
 # who clones this repo and opens a PR gets the exact same, real CI run.
 name: validate
 
+# No `paths:` filter, deliberately: `main`'s branch protection requires this
+# job's own `validate` check to have reported success before any PR can
+# merge (2026-09-20). A `paths:` filter that skips PRs touching only
+# README.md/docs/dashboards would mean GitHub waits forever for a check that
+# was never going to run, which doesn't skip validation -- it permanently
+# blocks the PR from becoming mergeable at all. The job itself already
+# handles "no contract files changed" as a fast, successful no-op (see the
+# "No contracts changed" step below), so running it unconditionally costs a
+# few seconds of CI time per PR, not a real validation of anything, on a PR
+# that doesn't touch a contract.
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "contracts/**"
-      - "change_classes.yaml"
-      - "src/uc_metadata/**"
-      - "cli/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/validate.yml"
 
 jobs:
   validate:
