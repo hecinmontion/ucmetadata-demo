@@ -1,0 +1,52 @@
+# workspace.marketing.leads -- brand new, never reviewed. Harvested for real
+# against the live `ucmeta` workspace and left exactly as harvest produced it:
+# every judgment field genuinely blank, dataset-level fields still carrying
+# harvest.py's placeholder sentinels. No dq_registry.yaml rule is registered
+# for this table either, deliberately -- this is coverage.py's floor case:
+# has_owner=True (a human had to type a real --ba-id to harvest this at all),
+# has_description/has_sensitivity/has_dq_rules all False. 25% fill rate, not a
+# literal zero -- see coverage.py's own comment on why has_owner can't be
+# False for any contract that exists. Contrasted against orders.yaml (also
+# unreviewed, but with DQ rules already registered, so it scores 50%): this
+# is the dataset nobody has looked at even once.
+version: 1
+dataset:
+  qualifier:
+    catalog: workspace
+    schema: marketing
+    table: leads
+  owner:
+    business_application_id: BA-20144
+  refresh:
+    cadence: 'TODO(human): declare a cadence, e.g. daily'
+    sla_minutes: 1
+  retention_days: 1
+  certification: bronze
+  description: 'TODO(human): describe this dataset -- harvest cannot know this; it
+    is never harvested.'
+columns:
+- name: lead_id
+  data_type: bigint
+  nullable: true
+  partition_key: false
+  tags: []
+- name: email
+  data_type: string
+  nullable: true
+  partition_key: false
+  tags: []
+- name: source
+  data_type: string
+  nullable: true
+  partition_key: false
+  tags: []
+- name: created_at
+  data_type: timestamp
+  nullable: true
+  partition_key: false
+  tags: []
+- name: status
+  data_type: string
+  nullable: true
+  partition_key: false
+  tags: []
