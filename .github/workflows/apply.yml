@@ -73,6 +73,19 @@ jobs:
       # to make that profile exist before the job runs. Only ever runs when
       # step `credential` found all three secrets present; never prints their
       # values, only that the file was written.
+      # `auth_type = oauth-m2m` is a deliberate, load-bearing line, not
+      # boilerplate: without it, the first live-apply run (PR #4) showed the
+      # Databricks SDK spends its first five minutes probing the workspace's
+      # `.well-known/databricks-config` host-metadata endpoint to guess which
+      # auth strategy to use from host+client_id+client_secret alone -- a
+      # probe that hangs to its full timeout on this runner network rather
+      # than failing fast the way it apparently does locally -- before ever
+      # falling back to the explicit fields, and even then discovery_url
+      # still resolved to None. Naming the auth type explicitly skips that
+      # probe entirely; this is the documented way to do that, not a guess
+      # (confirmed against a temporary diagnostic step run in this same job,
+      # since credential handling here means we can't safely replay this
+      # locally against a second copy of the secret).
       - name: Write the CI apply Databricks profile
         if: steps.credential.outputs.configured == 'true'
         env:
@@ -85,33 +98,9 @@ jobs:
             echo "host = ${DATABRICKS_CI_HOST}"
             echo "client_id = ${DATABRICKS_CI_CLIENT_ID}"
             echo "client_secret = ${DATABRICKS_CI_CLIENT_SECRET}"
+            echo "auth_type = oauth-m2m"
           } >> ~/.databrickscfg
           echo "Wrote a ucmeta-ci-apply OAuth M2M profile to ~/.databrickscfg (values not printed)."
-
-      # Temporary diagnostic (2026-09-19): the live-apply step below failed
-      # with "oauth-m2m: Invalid URL 'None': No scheme supplied" building
-      # WorkspaceClient(profile="ucmeta-ci-apply") -- discovery_url resolved
-      # to None even though the same three secret values work fine locally
-      # via the same code path under a differently-named local profile. This
-      # step prints only structural facts (lengths, whether host looks like a
-      # URL, resolved discovery_url) -- GitHub also auto-redacts any exact
-      # match against a registered secret value regardless. Removed once the
-      # root cause is found.
-      - name: Diagnose the CI apply profile (temporary)
-        if: steps.credential.outputs.configured == 'true'
-        run: |
-          uv run python3 -c "
-          from databricks.sdk.core import Config
-          cfg = Config(profile='ucmeta-ci-apply')
-          print('host repr:', repr(cfg.host))
-          print('host starts with https://:', str(cfg.host).startswith('https://') if cfg.host else None)
-          print('client_id len:', len(cfg.client_id) if cfg.client_id else None)
-          print('client_secret len:', len(cfg.client_secret) if cfg.client_secret else None)
-          try:
-              print('discovery_url:', cfg.discovery_url)
-          except Exception as e:
-              print('discovery_url raised:', type(e).__name__, e)
-          "
 
       # ---- changed-file discovery --------------------------------------------
       # Mechanism: `git diff --name-only <before>..<after>`, where `before`/
