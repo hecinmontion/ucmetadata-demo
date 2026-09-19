@@ -17,7 +17,8 @@ dataset:
     sla_minutes: 120
   retention_days: 730
   certification: silver
-  description: Customer master records for the direct-to-consumer storefront.
+  description: Customer master records for the direct-to-consumer storefront. One row
+    per customer; no historical/slowly-changing versions are kept.
   sensitivity:
     value: confidential
     ai_proposed: false
