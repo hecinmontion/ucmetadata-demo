@@ -2,7 +2,7 @@ catalog_name: examples_invalid_catalog
 business_application_id: BA-99999
 business_area: marketing
 region:
-description: Deliberately invalid catalog request for examples/03 and examples/04 — the business_application_id does not resolve.
+description: Deliberately invalid catalog request for docs/examples/03 and docs/examples/04 — the business_application_id does not resolve.
 default_schema: default
 sensitivity:
 requested_by: Demo Author

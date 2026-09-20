@@ -7,7 +7,7 @@ for.
 
 ## Fixture
 
-`examples/fixtures/example-catalog-request.yaml` is a copy of
+`docs/examples/fixtures/example-catalog-request.yaml` is a copy of
 `catalog-requests/_template.yaml` with every required field filled in with
 illustrative demo values (a real registered business application id,
 `BA-20144`, resolved from `src/uc_metadata/owner_registry.py`):
@@ -17,7 +17,7 @@ catalog_name: examples_demo_catalog
 business_application_id: BA-20144
 business_area: marketing
 region:
-description: Illustrative catalog request authored for examples/01-provision-catalog-fake-success.md — not a real business need.
+description: Illustrative catalog request authored for docs/examples/01-provision-catalog-fake-success.md — not a real business need.
 default_schema: default
 sensitivity:
 requested_by: Demo Author
@@ -27,7 +27,7 @@ environment: silver
 ## Command
 
 ```
-uv run ucmeta provision-catalog examples/fixtures/example-catalog-request.yaml --approved-by "Demo Author"
+uv run ucmeta provision-catalog docs/examples/fixtures/example-catalog-request.yaml --approved-by "Demo Author"
 ```
 
 No `--live` flag, so this defaults to `FakeUCClient` — nothing here ever touches

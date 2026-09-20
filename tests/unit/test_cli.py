@@ -32,7 +32,7 @@ from uc_metadata.release_log import DeploymentStatus, read_release_log
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI_PATH = REPO_ROOT / "cli" / "ucmeta"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
-INVALID_CATALOG_REQUEST_FIXTURE = REPO_ROOT / "examples" / "fixtures" / "example-catalog-request-invalid.yaml"
+INVALID_CATALOG_REQUEST_FIXTURE = REPO_ROOT / "docs" / "examples" / "fixtures" / "example-catalog-request-invalid.yaml"
 
 TABLE = "workspace.analytics.customers"
 KNOWN_BA_ID = "BA-10231"

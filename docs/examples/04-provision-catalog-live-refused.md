@@ -10,14 +10,14 @@ fails validation, and the privileged identity refuses it identically").
 ## Fixture
 
 The same deliberately-invalid fixture as demo 03,
-`examples/fixtures/example-catalog-request-invalid.yaml`
+`docs/examples/fixtures/example-catalog-request-invalid.yaml`
 (`business_application_id: BA-99999`, unresolvable against
 `owner_registry.py`).
 
 ## Command
 
 ```
-uv run ucmeta provision-catalog examples/fixtures/example-catalog-request-invalid.yaml --live --profile ucmeta-ci-provision --approved-by "Demo Author"
+uv run ucmeta provision-catalog docs/examples/fixtures/example-catalog-request-invalid.yaml --live --profile ucmeta-ci-provision --approved-by "Demo Author"
 ```
 
 `--profile ucmeta-ci-provision` is used here (rather than `ucmeta-ci`) because

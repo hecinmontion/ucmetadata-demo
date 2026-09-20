@@ -1,13 +1,23 @@
-# UC Metadata Platform
+# UC Metadata Platform — what we have
 
 A working prototype for improving metadata quality and coverage on a Databricks + Unity Catalog
-platform, where data teams own their datasets and a platform team provides shared guardrails.
+platform, where data teams own their datasets and a platform team provides shared guardrails. It
+ships **two solutions**, both real and both load-bearing — not one primary feature with an
+afterthought bolted on:
+
+- **The harvester** (F-PLATFORM-001) turns an existing, undocumented dataset into a governed,
+  reviewed, coverage-measured asset.
+- **The catalog provider** (F-PLATFORM-004/005) turns catalog creation itself — today an
+  out-of-band, hand-run administrative action — into the same reviewed-file-then-merge governance
+  model as everything else.
 
 Metadata is a versioned, reviewed file. An AI drafter removes the blank-page cost of writing it.
 A human approves every judgment before anything reaches the catalogue. Coverage is published so
-the gap is visible rather than assumed.
+the gap is visible rather than assumed — the same discipline both solutions share.
 
-Design decisions live in [`docs/`](docs/) as ADRs:
+Design decisions for both solutions live under [`docs/adrs/`](docs/adrs/) as ADRs, listed below.
+How each solution is actually put together — its components, what runs where, what talks to what
+— is described in [`docs/architecture/`](docs/architecture/).
 
 | ADR | Decision |
 |---|---|
@@ -22,7 +32,7 @@ Design decisions live in [`docs/`](docs/) as ADRs:
 | [ADR-009](docs/adrs/ADR-009-ci-only-apply-a-machine-identity-and-a-tested-boundary.md) | CI-only apply: a machine identity for the write path, and a tested boundary on the human's |
 | [ADR-011](docs/adrs/ADR-011-a-second-machine-identity-so-the-first-one-did-not-have-to-grow.md) | A second machine identity, `ucmeta-ci-provision`, for catalog creation — so `ucmeta-ci-apply`'s least-privilege claim didn't have to widen |
 
-## Problem
+## The problem, and two solutions
 
 On a Unity Catalog platform where data teams own their own data products, most datasets end up
 with almost no useful metadata. The cause is not laziness and not missing tooling: describing a
@@ -32,7 +42,12 @@ publish a table, cut a release and get access granted without describing a singl
 paid downstream, by consumers who cannot find datasets, cannot tell two similar tables apart,
 re-ingest a source that already exists, and cannot judge whether data is trustworthy or sensitive.
 
-This prototype attacks the cause rather than the symptom, in three moves:
+This prototype attacks that cause with two solutions, not one solution and an addendum.
+
+### The harvester (F-PLATFORM-001)
+
+Turns an existing, undocumented dataset into a governed, reviewed, coverage-measured asset, in
+three moves:
 
 1. **Put the metadata on the path the producer already walks.** The design: a new dataset should
    not be provisioned without a valid contract, and no consumer read grant should be issued for a
@@ -41,22 +56,107 @@ This prototype attacks the cause rather than the symptom, in three moves:
    actually built in this codebase is the machine-readable verdict (`validate.py`) that gate would
    call on every provisioning/grant request; wiring it into a real Terraform provisioning pipeline
    is the target organisation's job, not this prototype's — ADR-007 names exactly where that
-   boundary sits, and the README's "What's mocked" table calls it out as described, not enforced.
+   boundary sits, and "What's mocked" below calls it out as described, not enforced.
 2. **Remove the blank-page cost.** An AI drafter proposes a description, a business-term link and
    a sensitivity classification for every column. It proposes; it never publishes (ADR-002).
 3. **Make the gap visible.** Coverage is computed and published per team, next to an outcome
    measure, so "coverage went up" can be checked against "anything got better".
 
-Where the platform does *not* own a choke point, it does not pretend to. A schema change inside a
+Where the platform does not own a choke point, it does not pretend to: a schema change inside a
 producer's own pipeline repository is **detected as drift, never blocked** — see ADR-007 for why
 detect-only is the honest position there.
 
-All three moves above assume a catalog to describe already exists. Since F-PLATFORM-004/005, the
-platform also reaches one step earlier: a catalog itself is provisioned from a reviewed request
-file rather than hand-run administration, so a dataset's home can carry the same review-and-audit
-trail its metadata does before a single table exists inside it. This is a second, smaller loop
-alongside the one above, not a fourth move on the same three — see the callout under the diagram
-and Quickstart's `provision-catalog` step.
+Stated plainly: this solution attacks the actual cause of poor metadata — decoupling from the
+producer's obligations — not the symptom, and it works on the estate that already exists. Harvest
+reads facts for free, an AI drafter removes the blank-page cost, a human clears every judgment
+field, and apply writes only on merge.
+
+### The catalog provider (F-PLATFORM-004/005)
+
+All three moves above assume a catalog to describe already exists. Today, bringing a catalog into
+existence at all is an out-of-band, unreviewed action — "ask the platform team to run
+`CREATE CATALOG` by hand" — with no review, no audit trail, and no relationship to the contract
+discipline above. F-PLATFORM-001's own Business Context named this as somebody else's problem: the
+provisioning/grant gate's build verdict there describes "the centrally-owned Terraform
+provisioning flow and grant issuance" as things that "are not the prototype's to build or
+simulate — they belong to the target organisation's platform." F-PLATFORM-004/005 is this
+prototype deciding to build a piece of it after all.
+
+A team writes a nine-field request file, a human reviews it in a change request, a merge
+provisions it live against the real workspace, and the audit trail names who asked and who
+approved — the same reviewed-file-then-merge model as everything else here, applied one level
+earlier than a dataset.
+
+Stated plainly: this solution extends the "no dataset without a contract" forcing function one
+step earlier, to "no catalog without a reviewed request" — closing a gap the original design
+explicitly named as out of scope, not adding a fourth move onto the three moves above. It is a
+second, smaller loop alongside the harvester's, not a variant of it: no propose stage (a catalog
+request has no AI-drafted judgment field) and no coverage stage (nothing to compute a fill rate
+over) — see [`docs/architecture/catalog-provisioning.md`](docs/architecture/catalog-provisioning.md)
+for exactly how it's built.
+
+## This repo runs two ways
+
+**Local, credential-free.** Every verb defaults to `FakeUCClient`, the in-repo fake catalogue,
+whose fixture tables mirror the live workspace's schemas exactly. No Databricks account, no API
+key, nothing to authenticate — this is what CI runs by default (`validate.yml`, `coverage.yml`,
+and `apply.yml`/`provision-catalog.yml` on any fork with no CI credentials configured) and what a
+reviewer gets on a fresh clone, deterministic every time. `propose` is the one exception — it
+makes a real AI call — and it is clearly marked wherever it appears below.
+
+**Real, against an actual workspace.** Every verb also takes `--live` (and `--profile`, default
+`ucmeta`), which swaps the fake for `RealUCClient` against a real Databricks Free Edition
+workspace over `databricks-sdk`. Both solutions were live-verified this session, each behind its
+own machine identity — deliberately two separate identities, not one doing both (ADR-009,
+ADR-011):
+
+- `ucmeta-ci-apply` — writes table/column metadata (comments, tags, properties). Holds nothing
+  else: no create or drop privilege anywhere.
+- `ucmeta-ci-provision` — creates catalogs and schemas and tags them. Holds the metastore-level
+  `CREATE_CATALOG` privilege and nothing on any table.
+
+Each identity has its own re-runnable grant script — `scripts/provision_ci_apply_identity.sh` and
+`scripts/provision_ci_provision_identity.sh` — so the workspace side of this project is rebuildable
+from the repository, not just described in prose.
+
+**To replicate this yourself:**
+
+1. `databricks auth login` for a personal profile (OAuth user-to-machine, never a personal access
+   token) — see ADR-004 and `scripts/seed_demo_data.sql` for the workspace this targets.
+2. Run both grant scripts, as an account admin, to create the two service principals and their
+   grants.
+3. Mint each identity's credential and store it as its own set of GitHub Actions secrets. This
+   step stays manual by design; see [`docs/ci-service-principal.md`](docs/ci-service-principal.md)
+   and [`docs/ci-service-principal-provision.md`](docs/ci-service-principal-provision.md) for the
+   exact steps and the reasoning for keeping them manual.
+
+Note that `--live` apply no longer fully works from the author's own laptop, on purpose. Since
+2026-09-19 three of the four demo tables (`customers`, `orders`, `campaigns` — see
+`scripts/provision_ci_apply_identity.sh`) are owned by `ucmeta-ci-apply` and the author's personal
+identity holds `SELECT` on them and nothing else, so a local `ucmeta apply --live` against any of
+those three returns `partial_failure`: the comment and property writes are refused by Unity
+Catalog naming the missing `MODIFY` privilege, while tag writes still land via a metastore-admin
+bypass that no grant can switch off. That split outcome — what is enforced, what is not, and why —
+is ADR-009. `marketing.leads` (added after that provisioning script was written) is the one demo
+table this boundary does **not** yet cover — it is still owned by the author's own identity, a
+known, not-yet-closed gap rather than an oversight (the fix is re-running the provisioning script
+with a fourth table name added to its list).
+
+## Quick example
+
+Both solutions are CLI verbs of the same tool:
+
+```bash
+# The harvester: validate a reviewed contract, then apply it on merge.
+ucmeta validate contracts/analytics/customers.yaml
+ucmeta apply contracts/analytics/customers.yaml --approved-by "your name" --dry-run
+
+# The catalog provider: plan a catalog into existence from a reviewed request.
+ucmeta provision-catalog catalog-requests/_template.yaml --approved-by "your name" --dry-run
+```
+
+See [`docs/examples/`](docs/examples/) for the full set of 8 runnable, real-output demos (4 fake,
+4 live) covering both solutions.
 
 ## Approach
 
@@ -108,13 +208,13 @@ for bringing a catalog into existence in the first place:
 `catalog-requests/*.yaml` → `provision-catalog` → the same live-or-fake `UCClient` seam →
 `release_log.jsonl`. It has no propose or coverage stage of its own — a catalog request has no
 AI-drafted judgment field and nothing to compute a fill rate over — so it doesn't earn a second
-box this size; see Quickstart's `provision-catalog` step for the actual commands.
+box this size; see "Full command reference" below for the `provision-catalog` step's actual
+commands, and `docs/architecture/catalog-provisioning.md` for how it's built.
 
-## Quickstart
+## Full command reference
 
-No Databricks account and no API key are needed: every verb defaults to the in-repo fake
-catalogue (`FakeUCClient`), whose fixture tables mirror the live workspace's schemas
-exactly. `propose` is the one exception — it makes a real AI call — and it is clearly marked below.
+No Databricks account or API key is needed for any command below except `propose` — see
+"This repo runs two ways" above for why, and for how to point any of them at the real workspace.
 
 ```bash
 git clone https://github.com/hecinmontion/ucmetadata-demo.git
@@ -176,7 +276,7 @@ python dashboard/app.py /tmp/coverage_report.json -o /tmp/coverage.html
 #    request file rather than hand-run administration. Same discipline as apply:
 #    refuses the whole request, writing nothing, if it fails validation;
 #    --dry-run prints the plan and writes nothing.
-ucmeta provision-catalog examples/fixtures/example-catalog-request.yaml \
+ucmeta provision-catalog docs/examples/fixtures/example-catalog-request.yaml \
   --approved-by "your name" --dry-run
 #    Copy catalog-requests/_template.yaml to author a real request of your own.
 #    --live --profile ucmeta-ci-provision provisions for real, through the one
@@ -184,25 +284,6 @@ ucmeta provision-catalog examples/fixtures/example-catalog-request.yaml \
 #    F-PLATFORM-005 (CREATE_CATALOG) — see ADR-011 for why that's a second
 #    identity, not a widened ucmeta-ci-apply.
 ```
-
-**Running against a real workspace.** Every verb takes `--live` (and `--profile`, default
-`ucmeta`), which swaps the fake for `RealUCClient` against a real Unity Catalog workspace over
-`databricks-sdk`. It expects an already-authenticated Databricks CLI profile
-(`databricks auth login` — OAuth user-to-machine, never a personal access token); the repository
-holds a profile name and a host, never a secret. Set-up of that workspace is out of scope for this
-README — see ADR-004 and `scripts/seed_demo_data.sql`.
-
-**Note that `--live` apply no longer fully works from the author's own laptop, on purpose.** Since
-2026-09-19 three of the four demo tables (`customers`, `orders`, `campaigns` — see
-`scripts/provision_ci_apply_identity.sh`) are owned by a real service principal
-(`ucmeta-ci-apply`) and the author's personal identity holds `SELECT` on them and nothing else, so
-a local `ucmeta apply --live` against any of those three returns `partial_failure`: the comment and
-property writes are refused by Unity Catalog naming the missing `MODIFY` privilege, while tag
-writes still land via a metastore-admin bypass that no grant can switch off. That split outcome —
-what is enforced, what is not, and why — is ADR-009. `marketing.leads` (added after that
-provisioning script was written) is the one demo table this boundary does **not** yet cover — it is
-still owned by the author's own identity, a known, not-yet-closed gap rather than an oversight (the
-fix is re-running the provisioning script with a fourth table name added to its list).
 
 Also worth opening, because they are the artifacts rather than the prose:
 `contracts/analytics/customers.yaml` (the happy path), `contracts/marketing/campaigns.yaml`
@@ -212,9 +293,10 @@ validation for a different reason — genuinely pre-review), `contracts/marketin
 opposite extreme from `orders`: never harvested until this write-up, still carrying every
 placeholder harvest left it with — the lowest-scoring dataset coverage shows, and the concrete
 example behind the "can fill rate ever be 0%?" question answered below), `change_classes.yaml` (the
-two-track declaration) and `release_log.jsonl`. The `examples/` folder captures eight of these
-paths as runnable demos with real, actually-captured output: `01`-`04` for `provision-catalog`
-(fake and live, success and refusal), `05`-`08` for the harvest → document → apply → validate loop.
+two-track declaration) and `release_log.jsonl`. [`docs/examples/`](docs/examples/) captures eight of
+these paths as runnable demos with real, actually-captured output: `01`-`04` for
+`provision-catalog` (fake and live, success and refusal), `05`-`08` for the harvest → document →
+apply → validate loop.
 
 ## What's mocked
 

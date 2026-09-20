@@ -6,7 +6,7 @@ with zero writes attempted — before a single call reaches `FakeUCClient`
 
 ## Fixture
 
-`examples/fixtures/example-catalog-request-invalid.yaml` is shaped exactly
+`docs/examples/fixtures/example-catalog-request-invalid.yaml` is shaped exactly
 like demo 01's fixture, with one deliberate problem: `business_application_id:
 BA-99999`, an id that does not exist in `src/uc_metadata/owner_registry.py`'s
 four registered entries (`BA-10231`, `BA-20144`, `BA-30587`, `BA-40092`).
@@ -16,7 +16,7 @@ catalog_name: examples_invalid_catalog
 business_application_id: BA-99999
 business_area: marketing
 region:
-description: Deliberately invalid catalog request for examples/03 and examples/04 — the business_application_id does not resolve.
+description: Deliberately invalid catalog request for docs/examples/03 and docs/examples/04 — the business_application_id does not resolve.
 default_schema: default
 sensitivity:
 requested_by: Demo Author
@@ -34,7 +34,7 @@ than "some field was blank."
 ## Command
 
 ```
-uv run ucmeta provision-catalog examples/fixtures/example-catalog-request-invalid.yaml --approved-by "Demo Author"
+uv run ucmeta provision-catalog docs/examples/fixtures/example-catalog-request-invalid.yaml --approved-by "Demo Author"
 ```
 
 ## Actual output

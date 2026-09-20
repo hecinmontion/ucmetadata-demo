@@ -3,7 +3,7 @@
 Eight demos, each showing an exact command and the real, actually-captured
 output from running it — this repository's own "verified live, not asserted"
 discipline (every ADR in `docs/adrs/` follows it) applied to its own
-documentation. Fixtures each demo needs live under `examples/fixtures/`, never
+documentation. Fixtures each demo needs live under `docs/examples/fixtures/`, never
 under `catalog-requests/` — that folder is scanned by the real
 `.github/workflows/provision-catalog.yml` CI workflow's path filter on push,
 and a deliberately-invalid fixture sitting there would be a landmine for
