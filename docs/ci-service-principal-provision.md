@@ -138,29 +138,39 @@ call to delete the credential. This radius is disjoint from `ucmeta-ci-apply`'s 
 namespaces and cannot touch a table; the other can vandalise three tables' metadata and
 cannot create anything. Neither leak gives an attacker the other's capability.
 
-## The first real catalog
+## The real catalogs
 
 F-PLATFORM-005 revision 2 resolved that the first catalog `ucmeta-ci-provision` creates in
 the live workspace is kept permanently as standing evidence, rather than cleaned up after
-verification. **It exists.** Created 2026-09-20, kept deliberately — this section is the
-record so nobody later finds it and wonders who made it.
+verification. **They exist.** Two so far, kept deliberately — this section is the record so
+nobody later finds either and wonders who made it.
 
-| Field | Value |
-|---|---|
-| Catalog | `data_platform_demo` |
-| Schema inside it | `demo` |
-| Catalog tag | `sensitivity: internal` |
-| Created | 2026-09-20, by `ucmeta-ci-provision` |
-| Created from | `catalog-requests/data-platform-demo.yaml` |
-| Business application | `BA-40092` |
-| Requested by | `hectormb.9@gmail.com` |
-| Environment (medallion tier) | `bronze` |
+| Field | Value | Value |
+|---|---|---|
+| Catalog | `data_platform_demo` | `data_platform_demo_silver` |
+| Schema inside it | `demo` | `demo` |
+| Catalog tags | `business_area: platform`, `environment: bronze`, `sensitivity: internal` | `business_area: platform`, `environment: silver`, `sensitivity: internal` |
+| Created | 2026-09-20, by `ucmeta-ci-provision` | 2026-09-20, by `ucmeta-ci-provision` |
+| Created from | `catalog-requests/data-platform-demo-bronze.yaml` | `catalog-requests/data-platform-demo-silver.yaml` |
+| Business application | `BA-40092` | `BA-40092` |
+| Requested by | `hectormb.9@gmail.com` | `hectormb.9@gmail.com` |
 
-All three planned writes landed on the first run (`create catalog`, `create schema`,
-`set catalog sensitivity label`, `deployment_status: success`), and re-running the same
-command produced an identical clean success with no duplicate-object errors — the live
-confirmation of the idempotent-creation claim F-PLATFORM-004 had only ever proven against
-the in-memory fake.
+`data_platform_demo_silver` was provisioned via a real merge to `main` — the first time
+`provision-catalog.yml`'s live branch fired from an actual push rather than a hand-run
+command, and it succeeded on the first try (see F-PLATFORM-005's revision history). Both
+catalogs' tags were widened after the fact (F-PLATFORM-004 rev 4) from `sensitivity` alone to
+all three fields above: `business_area`/`environment` were previously recorded only in the
+request file, never written into Unity Catalog, until the tag-write step in
+`provision_catalog.py` was widened. Re-running the provisioning command against either
+catalog is what backfilled the two new tags — no new grant was needed, since
+`ucmeta-ci-provision` already owns both catalogs as their creator, and ownership already
+carries full tag-write control.
+
+All three planned writes land on every run (`create catalog`, `create schema`,
+`set catalog tags`, `deployment_status: success`), and re-running the same command against
+an already-provisioned catalog produces an identical clean success with no duplicate-object
+errors — the live confirmation of the idempotent-creation claim F-PLATFORM-004 had only ever
+proven against the in-memory fake.
 
 **This catalog is not cleaned up, and that is deliberate rather than an oversight.** Keeping
 it adds no delete capability to the platform, and removing it would not have used one either

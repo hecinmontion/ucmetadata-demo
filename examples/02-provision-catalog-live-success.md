@@ -9,7 +9,7 @@ provisioned request is safe, because every write it plans is idempotent
 ## Why this reuses an existing request file rather than authoring a new one
 
 This demo deliberately reuses the real, already-provisioned request file
-`catalog-requests/data-platform-demo.yaml` (`data_platform_demo`, first
+`catalog-requests/data-platform-demo-bronze.yaml` (`data_platform_demo`, first
 provisioned live during F-PLATFORM-005's own build). Re-running it is
 idempotent and safe — and it means this documentation pass doesn't create yet
 another permanent real catalog in the workspace just to have something to
@@ -32,7 +32,7 @@ environment: bronze
 ## Command
 
 ```
-uv run ucmeta provision-catalog catalog-requests/data-platform-demo.yaml --live --profile ucmeta-ci-provision --approved-by "Demo Author"
+uv run ucmeta provision-catalog catalog-requests/data-platform-demo-bronze.yaml --live --profile ucmeta-ci-provision --approved-by "Demo Author"
 ```
 
 ## Actual output
@@ -41,13 +41,16 @@ uv run ucmeta provision-catalog catalog-requests/data-platform-demo.yaml --live 
 provision-catalog data_platform_demo: success
   OK   create catalog
   OK   create schema
-  OK   set catalog sensitivity label
+  OK   set catalog tags
 ```
 
 All three writes report success again on this re-run — `data_platform_demo`
 already existed live from a prior run, and `CREATE CATALOG IF NOT EXISTS` /
 `CREATE SCHEMA IF NOT EXISTS` / `ALTER CATALOG ... SET TAGS` all converge
-cleanly on state that is already there, rather than erroring.
+cleanly on state that is already there, rather than erroring. This re-run
+also converges the real catalog's tags onto a widened tag-write step:
+`business_area` and `environment` are now written as catalog tags alongside
+`sensitivity`, backfilling them onto `data_platform_demo` for the first time.
 
 ## Why this matters
 
