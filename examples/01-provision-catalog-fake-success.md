@@ -39,11 +39,13 @@ the real workspace.
 provision-catalog examples_demo_catalog: success
   OK   create catalog
   OK   create schema
+  OK   set catalog tags
 ```
 
-Only two writes ran (not three) because `sensitivity` was left blank in the
-fixture — `_build_write_steps` only plans the "set catalog sensitivity label"
-write when a request declares one (`src/uc_metadata/provision_catalog.py`).
+All three writes ran even though `sensitivity` was left blank in the
+fixture — the "set catalog tags" write always carries `business_area` and
+`environment` (both required fields), and only adds `sensitivity` when a
+request declares one (`src/uc_metadata/provision_catalog.py`).
 
 ## Why "verifying" this means reading the output above, not a follow-up query
 
@@ -54,7 +56,7 @@ one thing this run leaves behind on disk is its `release_log.jsonl` entry
 (an audit record, not catalogue state):
 
 ```json
-{"full_name":"examples_demo_catalog","contract_version":1,"summary":"provisioned 2 write(s)","approved_by":"Demo Author","deployment_status":"success","writes_succeeded":["create catalog","create schema"],"writes_failed":[],"problems":[],"requested_by":"Demo Author"}
+{"full_name":"examples_demo_catalog","contract_version":1,"summary":"provisioned 3 write(s)","approved_by":"Demo Author","deployment_status":"success","writes_succeeded":["create catalog","create schema","set catalog tags"],"writes_failed":[],"problems":[],"requested_by":"Demo Author"}
 ```
 
 There is no `ucmeta describe-catalog examples_demo_catalog` command that could

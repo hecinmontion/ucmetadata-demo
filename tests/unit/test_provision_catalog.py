@@ -1,7 +1,7 @@
 """Happy-path tests for `provision_catalog.py`: a valid request plans and
 provisions a catalog and its schema (SC-004-01), re-provisioning an existing
-catalog is an idempotent no-op except that the sensitivity label converges on
-a changed value (SC-004-02), a malformed or unresolvable request is refused
+catalog is an idempotent no-op except that its tags converge on their
+current values (SC-004-02), a malformed or unresolvable request is refused
 whole with zero writes (SC-004-03), and a mid-plan failure is reported as a
 named partial success that a re-run then completes (SC-004-06).
 
@@ -109,7 +109,8 @@ def test_valid_request_plans_and_provisions_catalog_schema_and_label(tmp_path: P
     assert [attempt.sql for attempt in result.writes_succeeded] == plan
     assert client.catalog_exists("analytics_ba10231") is True
     assert client.schema_exists("analytics_ba10231", "default") is True
-    assert client.catalog_tags("analytics_ba10231")["sensitivity"] == "confidential"
+    tags = client.catalog_tags("analytics_ba10231")
+    assert tags == {"business_area": "analytics", "environment": "bronze", "sensitivity": "confidential"}
 
     records = read_release_log(log_path)
     assert len(records) == 1
@@ -144,8 +145,9 @@ def test_reprovisioning_leaves_the_catalog_as_is_but_converges_the_label(tmp_pat
     assert second.ok is True
     # Create-only: the description is never re-applied to a catalog that already exists.
     assert client.catalog_comment("analytics_ba10231") == "Original description."
-    # The one named exception: the sensitivity label converges on the current value.
-    assert client.catalog_tags("analytics_ba10231")["sensitivity"] == "confidential"
+    # The one named exception: the tags converge on the request's current values.
+    tags = client.catalog_tags("analytics_ba10231")
+    assert tags == {"business_area": "analytics", "environment": "bronze", "sensitivity": "confidential"}
 
     records = read_release_log(log_path)
     assert len(records) == 2
@@ -265,7 +267,10 @@ def test_schema_creation_failure_reports_partial_success_and_a_rerun_completes_i
 
     assert first.status == DeploymentStatus.PARTIAL_FAILURE
     assert first.ok is False
-    assert {attempt.label for attempt in first.writes_succeeded} == {"create catalog"}
+    # The write loop keeps going past the failed step (SC-004-06): "set
+    # catalog tags" only needs the catalog to exist, not the schema, so it
+    # still lands even though "create schema" failed.
+    assert {attempt.label for attempt in first.writes_succeeded} == {"create catalog", "set catalog tags"}
     assert {attempt.label for attempt in first.writes_failed} == {"create schema"}
     assert "synthetic scenario-test failure" in first.writes_failed[0].error
     assert client.catalog_exists("analytics_ba10231") is True  # not rolled back

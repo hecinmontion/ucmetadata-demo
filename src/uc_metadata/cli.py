@@ -339,12 +339,6 @@ def _print_provision_result(result: ProvisionResult) -> None:
         print(f"  FAIL {attempt.label}: {attempt.error}")
     if result.release_log_error:
         print(f"  {result.release_log_error}")
-    for attempt in result.writes_succeeded:
-        print(f"  OK   {attempt.label}")
-    for attempt in result.writes_failed:
-        print(f"  FAIL {attempt.label}: {attempt.error}")
-    if result.release_log_error:
-        print(f"  {result.release_log_error}")
 
 
 # ---- coverage ------------------------------------------------------------------

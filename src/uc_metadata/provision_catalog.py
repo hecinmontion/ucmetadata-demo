@@ -12,18 +12,23 @@ are therefore a second, independent implementation of that shape, not an
 import of `apply.py`'s.
 
 What gets written, in what order, and why -- `_build_write_steps`'s three
-possible steps, each a single call to one of the three `UCClient` methods
-`uc_client.py` added for this feature:
+steps, always all three, each a single call to one of the three `UCClient`
+methods `uc_client.py` added for this feature:
 
 - `create_catalog(catalog_name, description)` -- always first; nothing else
   can exist until the catalog does.
 - `create_schema(catalog_name, default_schema)` -- always second; a catalog
   with no schema in it is not something a team can use (Rules & Constraints:
   "a catalog with no schema in it is not a provisioned catalog").
-- `set_catalog_tags(catalog_name, {"sensitivity": ...})` -- only when the
-  request declared a `sensitivity`; the create-only rule's single named
+- `set_catalog_tags(catalog_name, tags)` -- always third; `tags` always
+  carries `business_area` and `environment` (both required fields, plain
+  classification values a consumer filters/searches by -- the same tags-vs-
+  properties distinction `apply.py`'s own docstring draws), plus `sensitivity`
+  when the request declared one. This is the create-only rule's single named
   exception, since this is the one write in the plan that is re-applied (and
-  converges on the current value) on every run, not just the first.
+  converges on the current values) on every run, not just the first. `region`
+  is deliberately not among them -- see `CatalogRequest.region`'s own
+  docstring: recording it is not the same as the platform acting on it.
 
 Refusal (SC-004-03) -- validation runs, and the whole request is refused with
 zero writes, before any statement in the plan above is even built. Unlike
@@ -79,7 +84,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -219,17 +224,17 @@ def plan_provision(request: CatalogRequest, client: UCClient) -> List[str]:
 
 def _build_write_steps(request: CatalogRequest, client: UCClient) -> List[_WriteStep]:
     """Build the ordered list of writes `plan_provision`/`provision` share:
-    create the catalog, create its default schema, and -- only if a
-    sensitivity was declared -- label the catalog. This order is the one
-    SC-004-01 names explicitly."""
+    create the catalog, create its default schema, and tag the catalog. This
+    order is the one SC-004-01 names explicitly. The tag step is
+    unconditional -- `business_area` and `environment` are required fields,
+    always present -- unlike the `sensitivity` key it also carries, which is
+    included only when the request declared one."""
     catalog_name = request.catalog_name
-    steps: List[_WriteStep] = [
+    return [
         _create_catalog_step(client, catalog_name, request.description),
         _create_schema_step(client, catalog_name, request.default_schema),
+        _set_catalog_tags_step(client, catalog_name, request),
     ]
-    if request.sensitivity is not None:
-        steps.append(_set_sensitivity_tag_step(client, catalog_name, request.sensitivity))
-    return steps
 
 
 def _create_catalog_step(client: UCClient, catalog_name: str, description: str) -> _WriteStep:
@@ -250,11 +255,22 @@ def _create_schema_step(client: UCClient, catalog_name: str, schema_name: str) -
     )
 
 
-def _set_sensitivity_tag_step(client: UCClient, catalog_name: str, sensitivity: Sensitivity) -> _WriteStep:
-    tags = {"sensitivity": sensitivity.value}
+def _catalog_tags(request: CatalogRequest) -> Dict[str, str]:
+    """The catalog-level governance tags every request always carries
+    (`business_area`, `environment`), plus `sensitivity` when the request
+    declared one. Tag keys are the request's own field names, verbatim --
+    the same convention `sensitivity` already established."""
+    tags = {"business_area": request.business_area, "environment": request.environment.value}
+    if request.sensitivity is not None:
+        tags["sensitivity"] = request.sensitivity.value
+    return tags
+
+
+def _set_catalog_tags_step(client: UCClient, catalog_name: str, request: CatalogRequest) -> _WriteStep:
+    tags = _catalog_tags(request)
     sql = client.set_catalog_tags(catalog_name, tags, dry_run=True)
     return _WriteStep(
-        label="set catalog sensitivity label",
+        label="set catalog tags",
         sql=sql,
         execute=lambda: client.set_catalog_tags(catalog_name, tags),
     )
