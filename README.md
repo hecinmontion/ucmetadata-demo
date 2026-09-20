@@ -20,6 +20,7 @@ Design decisions live in [`docs/`](docs/) as ADRs:
 | [ADR-007](docs/adrs/ADR-007-gate-provisioning-and-grants.md) | Gate provisioning and grants, not schema changes (the forcing function) |
 | [ADR-008](docs/adrs/ADR-008-coverage-history-and-native-dashboard.md) | Coverage history as a Unity Catalog table, with a native AI/BI dashboard over it |
 | [ADR-009](docs/adrs/ADR-009-ci-only-apply-a-machine-identity-and-a-tested-boundary.md) | CI-only apply: a machine identity for the write path, and a tested boundary on the human's |
+| [ADR-011](docs/adrs/ADR-011-a-second-machine-identity-so-the-first-one-did-not-have-to-grow.md) | A second machine identity, `ucmeta-ci-provision`, for catalog creation — so `ucmeta-ci-apply`'s least-privilege claim didn't have to widen |
 
 ## Problem
 
@@ -50,6 +51,13 @@ Where the platform does *not* own a choke point, it does not pretend to. A schem
 producer's own pipeline repository is **detected as drift, never blocked** — see ADR-007 for why
 detect-only is the honest position there.
 
+All three moves above assume a catalog to describe already exists. Since F-PLATFORM-004/005, the
+platform also reaches one step earlier: a catalog itself is provisioned from a reviewed request
+file rather than hand-run administration, so a dataset's home can carry the same review-and-audit
+trail its metadata does before a single table exists inside it. This is a second, smaller loop
+alongside the one above, not a fourth move on the same three — see the callout under the diagram
+and Quickstart's `provision-catalog` step.
+
 ## Approach
 
 One human-readable contract file per dataset is the only authoring surface. Facts the catalogue
@@ -58,7 +66,7 @@ by a named human, reviewed in a change request, and applied to the live catalogu
 Two gates are meant to make that loop start at all (provisioning, grants — the design ADR-007
 argues for, resting on a real verdict function but not yet wired into any real provisioning
 pipeline) and two more actually make it safe today (the unreviewed-marker refusal, and
-apply-on-merge-only, both enforced and demonstrated). Everything is files, a five-verb CLI, and CI.
+apply-on-merge-only, both enforced and demonstrated). Everything is files, a six-verb CLI, and CI.
 
 ```
                        ┌──────────────────────────────────────────────┐
@@ -94,6 +102,13 @@ apply-on-merge-only, both enforced and demonstrated). Everything is files, a fiv
   · grandfathered estate: drift + coverage,       changes the slow one — routed by file path,
     never a retroactive block                     never argued per change request (ADR-006)
 ```
+
+The diagram above is the *describe-a-dataset* loop. A second, smaller loop exists alongside it,
+for bringing a catalog into existence in the first place:
+`catalog-requests/*.yaml` → `provision-catalog` → the same live-or-fake `UCClient` seam →
+`release_log.jsonl`. It has no propose or coverage stage of its own — a catalog request has no
+AI-drafted judgment field and nothing to compute a fill rate over — so it doesn't earn a second
+box this size; see Quickstart's `provision-catalog` step for the actual commands.
 
 ## Quickstart
 
@@ -155,6 +170,19 @@ ucmeta apply contracts/analytics/customers.yaml --approved-by "your name" \
 #    simulated) outcome measure. Then render it as a static page.
 ucmeta coverage contracts/ -o /tmp/coverage_report.json
 python dashboard/app.py /tmp/coverage_report.json -o /tmp/coverage.html
+
+# 6. PROVISION-CATALOG — bring a catalog into existence (its first schema, plus
+#    business_area/environment/sensitivity as catalog tags), from a reviewed
+#    request file rather than hand-run administration. Same discipline as apply:
+#    refuses the whole request, writing nothing, if it fails validation;
+#    --dry-run prints the plan and writes nothing.
+ucmeta provision-catalog examples/fixtures/example-catalog-request.yaml \
+  --approved-by "your name" --dry-run
+#    Copy catalog-requests/_template.yaml to author a real request of your own.
+#    --live --profile ucmeta-ci-provision provisions for real, through the one
+#    metastore-level privilege this project's automation didn't hold before
+#    F-PLATFORM-005 (CREATE_CATALOG) — see ADR-011 for why that's a second
+#    identity, not a widened ucmeta-ci-apply.
 ```
 
 **Running against a real workspace.** Every verb takes `--live` (and `--profile`, default
@@ -184,7 +212,9 @@ validation for a different reason — genuinely pre-review), `contracts/marketin
 opposite extreme from `orders`: never harvested until this write-up, still carrying every
 placeholder harvest left it with — the lowest-scoring dataset coverage shows, and the concrete
 example behind the "can fill rate ever be 0%?" question answered below), `change_classes.yaml` (the
-two-track declaration) and `release_log.jsonl`.
+two-track declaration) and `release_log.jsonl`. The `examples/` folder captures eight of these
+paths as runnable demos with real, actually-captured output: `01`-`04` for `provision-catalog`
+(fake and live, success and refusal), `05`-`08` for the harvest → document → apply → validate loop.
 
 ## What's mocked
 
@@ -196,12 +226,15 @@ free, touch it rather than imitating it.*
 |---|---|---|
 | Contract model + JSON Schema (`models.py`, `contracts/_schema/`) | **Real** | The primitive everything else rests on, with a backwards-compatibility test. |
 | `uc_client.py` (`UCClient` protocol + `RealUCClient`) | **Real, against a real workspace** | Thin `databricks-sdk` translation: it translates, it does not decide (ADR-004). |
+| `uc_client.py`'s three catalog-provisioning methods (`create_catalog`, `create_schema`, `set_catalog_tags`) | **Real, against a real workspace** | The first operations this platform performs on something other than an already-existing table (`CREATE CATALOG` / `CREATE SCHEMA` / `ALTER CATALOG ... SET TAGS`, through the same statement-execution seam every other write uses). Live-verified twice, once per real catalog. |
 | `fake_uc.py` | **Fake, test-only** | Not the product's target. Exists so tests are offline and deterministic, and so the seam has two implementations; a shared contract-test suite runs against both. |
 | `harvest.py` | **Real logic, real source** | Ran for real against the live workspace; the three shipped contracts were harvested from it. |
 | `propose.py` | **Real (real model, real calls)** | `claude-haiku-4-5`, structured output, masked samples, glossary-grounded term links. Recorded fixtures in CI. Every real call writes a `<name>.audit.json` next to the contract (model, timestamp, both prompts, masked column-level inputs — never raw PII). See the open gap below. |
 | `validate.py` | **Real** | Drift, unreviewed markers, placeholder sentinels, and certification-vs-evidence (calls `dq_registry.evaluate_rules` + `coverage.tier_is_supported_by_evidence`). This is why `contracts/marketing/campaigns.yaml` now fails `validate()`/`apply()` — see below. |
 | `apply.py` | **Real, real target** | Table comment, column comments, tags, properties. Idempotency and revert-restores proven against live Unity Catalog. |
-| `release_log.py` | **Mock writer, real interface, really wired** | Every apply appends a record. The writer is a local `release_log.jsonl`; the production adapter swaps the writer, not the record's shape. |
+| `provision_catalog.py` | **Real, real target** | Same validate → refuse-or-plan → execute → log discipline `apply.py` established, reimplemented independently against a catalog request rather than a contract (F-PLATFORM-004 shares nothing with `apply.py` but that discipline, on purpose). A fixed three-statement ordered plan — create catalog, create schema, set catalog tags — idempotent and partial-failure-aware, live-verified end to end as `ucmeta-ci-provision`. |
+| `catalog-requests/` + `_template.yaml` | **Real authoring surface** | The second authoring surface, sibling to `contracts/`: one nine-field YAML request per catalog. Two requests shipped and both provisioned live (`data-platform-demo-bronze.yaml`, `data-platform-demo-silver.yaml`) — the second via an actual merged PR, not a hand-run command. |
+| `release_log.py` | **Mock writer, real interface, really wired** | Every apply, and every `provision-catalog` run, appends a record. The writer is a local `release_log.jsonl`; the production adapter swaps the writer, not the record's shape. |
 | `coverage.py` + `dashboard/app.py` | **Real, minimal** | Fill rate per dimension and team, computed not described. Rendered as a static generated page — no served app to fail live. The static page is unchanged and stays zero-credential (spec F-PLATFORM-002 SC-002-03, mechanically enforced by a test). |
 | `coverage_history.py` + `dashboards/coverage.lvdash.json` (**ADR-008**) | **Real, both halves built** | The point-in-time report is now also durable: `workspace.platform.coverage_history`, one row per dataset per run, appended (never `UPDATE`d/`DELETE`d) via `ucmeta coverage --publish-history`, off by default. Bootstrapped by `scripts/bootstrap_coverage_history.sql`, confirmed live with real runs. A native AI/BI Dashboard queries that table — built by iterating against the live `lakeview` API (ADR-008's chosen route), created and published against the real workspace with zero errors, redeployable via `scripts/deploy_coverage_dashboard.sh`. All four widgets are confirmed rendering correctly in the browser. One honest scar: a `table` widget for "coverage by dataset" went through two API-accepted, hand-guessed column-schema definitions that both still failed to render — "Invalid widget definition is imported" — so it was rebuilt by hand through the workspace's own dashboard editor as a bar chart instead, then re-exported from the live dashboard back into `coverage.lvdash.json` to keep the file as source of truth. See `dashboards/README.md`. |
 | Outcome measure | **Simulated, labelled** | Computed from `sample_outcome_events.yaml`; every measure carries `simulated=True` and a caveat naming the fixture, so no caller can present it as observed. |
@@ -209,7 +242,7 @@ free, touch it rather than imitating it.*
 | `glossary/terms.yaml` + `glossary.py` | **Mock data, real grounding** | Twelve sample terms, loaded and passed to the drafter as context; a proposed term link is dropped unless it resolves to a real entry. At this size the whole glossary fits in the prompt, so there is no retrieval ranking to speak of — that would be the next step at real glossary scale. |
 | `dq_registry.yaml` + `dq_registry.py` | **Mock registry, real evaluation** | Six rules with a small predicate grammar, evaluated in Python over sampled rows — one rule language for both clients. No rule-execution engine. |
 | `change_classes.yaml` + `change_routing.py` | **Real, enforced** | The two-track split is a glob match over the change request's diff, not a paragraph in this README. |
-| CI workflows (`validate`, `apply`, `coverage`) | **Real, fake-backed** | See below. |
+| CI workflows (`validate`, `apply`, `coverage`, `provision-catalog`) | **Real, fake-backed** | See below. |
 | Provisioning / grant gates | **Described, on a real check** | The gates belong to the target organisation's platform. What is built is the machine-readable verdict they would call. |
 | Personal-data detection | **Mock, light** | AI proposal plus conservative name/value-shape masking. No compliance-grade classifier. |
 
@@ -241,6 +274,26 @@ is the *same* root cause as the original five-minute hang is deliberately not cl
 today's failures were both fast, clean, immediate errors, not a hang, and GitHub exposes no secret
 history to confirm when the host secret actually became malformed. See the ADR for the full,
 hedged reasoning.
+
+**`provision-catalog.yml`'s live branch worked the first time, and that contrast with `apply.yml`'s
+is itself worth stating plainly rather than letting a reader assume every live path here was
+equally shaky.** No five-minute mystery, no stacked secret bugs, nothing to root-cause: the three
+`ucmeta-ci-provision` secrets (`DATABRICKS_CI_PROVISION_HOST` / `_CLIENT_ID` / `_CLIENT_SECRET`,
+deliberately distinct names from `ucmeta-ci-apply`'s three so one credential can never be pasted
+into the other's slot unnoticed) were configured once, correctly, and the first real push to touch
+`catalog-requests/` — merging `catalog-requests/data-platform-demo-silver.yaml` — provisioned
+`data_platform_demo_silver` live as `ucmeta-ci-provision` on the first try: create catalog, create
+schema, set catalog tags, all `OK`, `deployment_status: success`. That is the first time this
+mechanism fired from an actual push rather than a hand-run command (a prior hand-run created the
+first catalog, `data_platform_demo`, while standing up the identity itself). See ADR-011 for the
+identity behind it — a second, provisioning-only service principal holding only the metastore-level
+`CREATE_CATALOG` privilege and warehouse `CAN_USE`, deliberately not a widened `ucmeta-ci-apply`,
+so ADR-009's least-privilege claim about that identity stays true without a footnote. Both real
+catalogs are kept permanently as standing evidence rather than cleaned up — this platform's
+provisioning has no delete path, by design — and both already carry real tables documented through
+the *existing* harvest → document → apply loop (`pipeline_runs` and `data_quality_checks` inside
+`data_platform_demo.demo`, contracts at `contracts/demo/*.yaml`), which is the concrete proof that
+the two paths compose rather than living in separate demos.
 
 **AI-proposed content is verified working, deliberately not baked into the shipped contracts.**
 `ucmeta propose contracts/analytics/orders.yaml --live` was run for real on 2026-09-19 against a
@@ -314,10 +367,20 @@ Every one of these is a decision with a cost, and the cost is stated rather than
   seam to keep honest (mitigated by a shared contract-test suite), and zero claim to production
   fidelity — Free Edition is serverless-only, one workspace, three tables, no staging metastore,
   no identity groups.
-- **A five-verb CLI over a framework or a service.** *Why:* `argparse`, one entry point, no
+- **A six-verb CLI over a framework or a service.** *Why:* `argparse`, one entry point, no
   dependency the project does not otherwise need; the same `main()` behind `./cli/ucmeta`, the
   `ucmeta` script and CI. *Cost:* no interactive affordances, and `ucmeta` remains a local tool
   rather than a service anything else can call.
+- **A second, provisioning-only machine identity (`ucmeta-ci-provision`), rather than a widened
+  `ucmeta-ci-apply`** (ADR-011). *Why:* the alternative was cheaper to build — one grant, no new
+  principal, no new credential — but it would have made ADR-009's least-privilege claim about
+  `ucmeta-ci-apply` false the moment the grant landed; keeping the two identities' blast radii
+  disjoint (`ucmeta-ci-apply` can vandalise three tables' metadata and create nothing anywhere;
+  `ucmeta-ci-provision` can create catalogs and touch no table) was judged worth the extra
+  identity. *Cost:* a second credential to store and eventually rotate, a second grant script, a
+  second document to keep in sync with the first — real overhead for a solo maintainer, and larger
+  than planned: the live credential came out with a 30-day lifetime rather than the ~2-year one
+  `ucmeta-ci-apply` holds, so this rotation is a real near-term chore, not a theoretical one.
 
 ## What I didn't do
 
@@ -346,6 +409,14 @@ choices, marked as such.
   rollout's "grandfathered but visible" story (ADR-007) only covers tables someone already chose to
   harvest. Closing this is a real, named gap (a `ucmeta scan --live` reconciliation verb that diffs
   a live catalogue listing against `contracts/`), not a design decision — it just is not built.
+- **Provisioning a catalog does not grant anyone access to it.** `provision-catalog` creates a
+  catalog and its default schema and nothing else — no `USE_CATALOG`, no `USE_SCHEMA` granted to
+  the requesting team automatically, on top of no second schema, no table and no grant of any kind
+  inside it (F-PLATFORM-004/005's own Out of Scope names this plainly: "a catalog and a schema
+  exist" is not the same as "the team can use them"). This was found live, not reasoned about in
+  advance — hector went looking for his own newly-provisioned catalog in the workspace UI and could
+  not see it. Closing it needs a grant step this feature deliberately does not build; a genuine
+  remaining gap, not a design decision.
 - **A prompt-injection test against the drafter.** A hostile column comment or sample value trying
   to steer the proposal is cheap to test and genuinely worth testing. It was deprioritised against
   the core loop, not judged unimportant. The structural defence that *is* present is that the
