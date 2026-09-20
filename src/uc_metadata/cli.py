@@ -1,17 +1,25 @@
-"""`ucmeta`: one entry point, five verbs (spec: `cli/ucmeta` build verdict) --
-`harvest`, `propose`, `validate`, `apply`, `coverage`. This module is pure
-wiring: every verb is a thin composition of the module that already does the
-real work (`harvest.py`, `propose.py`, `validate.py`, `apply.py`,
-`coverage.py`) plus argument parsing, a human-readable print, and an exit code
-a CI gate can branch on. No business logic lives here that isn't already
-proven elsewhere.
+"""`ucmeta`: one entry point, six verbs (spec: `cli/ucmeta` build verdict) --
+`harvest`, `propose`, `validate`, `apply`, `coverage`, `provision-catalog`.
+This module is pure wiring: every verb is a thin composition of the module
+that already does the real work (`harvest.py`, `propose.py`, `validate.py`,
+`apply.py`, `coverage.py`, `provision_catalog.py`) plus argument parsing, a
+human-readable print, and an exit code a CI gate can branch on. No business
+logic lives here that isn't already proven elsewhere.
 
-Standard-library `argparse` is used rather than `click`/`typer`: five verbs
+Standard-library `argparse` is used rather than `click`/`typer`: six verbs
 with a handful of flags each is squarely within what `argparse` handles
 cleanly, and every dependency this codebase adds is itself a discipline
 signal the spec calls out ("scattered scripts read as weaker") -- the same
 reasoning cuts against reaching for a CLI framework the project doesn't
 otherwise need.
+
+`provision-catalog` (spec F-PLATFORM-004) is the one verb with no live path
+anywhere in automation: `_add_client_args` is still wired the same way every
+other verb wires it, since `RealUCClient`'s three catalog-provisioning
+methods do exist and a human could still pass `--live` by hand, but
+`.github/workflows/provision-catalog.yml` never does -- see that file's own
+header comment for why creating a catalog needs a metastore-level privilege
+this repository's automation deliberately does not hold (F-PLATFORM-005).
 
 Default backend, stated once here rather than left to be rediscovered per
 verb: every verb defaults to `fake_uc.FakeUCClient`, the in-repo fake
@@ -70,6 +78,13 @@ from uc_metadata.harvest import harvest as harvest_contract
 from uc_metadata.models import CertificationTier, Contract, Refresh
 from uc_metadata.owner_registry import UnknownBusinessApplicationError
 from uc_metadata.propose import propose as propose_contract
+from uc_metadata.provision_catalog import (
+    ProvisionResult,
+    load_catalog_request,
+    plan_provision,
+    provision as provision_catalog,
+)
+from uc_metadata.release_log import DeploymentStatus
 from uc_metadata.uc_client import DEFAULT_UC_PROFILE, RealUCClient, UCClient, UCClientError
 from uc_metadata.validate import validate_yaml
 
@@ -272,6 +287,66 @@ def _print_apply_result(contract: Contract, result: ApplyResult) -> None:
         print(f"  {result.release_log_error}")
 
 
+# ---- provision-catalog -----------------------------------------------------------
+
+
+def _cmd_provision_catalog(args: argparse.Namespace, client: UCClient) -> int:
+    """`--dry-run` is the one branch that pre-loads the request itself, since a
+    plan (`plan_provision`) needs a validated `CatalogRequest` to build from
+    and must publish nothing regardless of outcome; a refusal here is printed
+    and returned without calling `provision()` at all, because a dry run
+    never touches the release log for any outcome (`load_catalog_request`
+    itself is side-effect-free). Every other run goes straight to
+    `provision()` without a pre-check here -- see `provision_catalog.py`'s
+    module docstring's "never trust a caller to have validated first"
+    discipline -- so the refuse-and-log path always runs through the one
+    function responsible for both validating and publishing the
+    `ReleaseRecord` (SC-004-03): calling `load_catalog_request` separately in
+    this layer first, the way an earlier version of this function did, meant
+    a refused request never reached `provision()`'s own `_refuse` step and so
+    never landed a release-log entry at all."""
+    if args.dry_run:
+        request, problems, identity = load_catalog_request(args.request)
+        if problems:
+            print(f"REFUSED: {identity} -- {len(problems)} problem(s):")
+            for problem in problems:
+                print(f"  - {problem}")
+            return 1
+        plan = plan_provision(request, client)
+        print(
+            f"Dry run: {len(plan)} statement(s) would be provisioned for "
+            f"{request.catalog_name} (nothing written):"
+        )
+        for statement in plan:
+            print(f"  {statement}")
+        return 0
+
+    result = provision_catalog(args.request, client, approved_by=args.approved_by, log_path=args.log_path)
+    if result.status == DeploymentStatus.REFUSED:
+        print(f"REFUSED: {result.catalog_name} -- {len(result.problems)} problem(s):")
+        for problem in result.problems:
+            print(f"  - {problem}")
+        return 1
+    _print_provision_result(result)
+    return 0 if result.ok else 1
+
+
+def _print_provision_result(result: ProvisionResult) -> None:
+    print(f"provision-catalog {result.catalog_name}: {result.status.value}")
+    for attempt in result.writes_succeeded:
+        print(f"  OK   {attempt.label}")
+    for attempt in result.writes_failed:
+        print(f"  FAIL {attempt.label}: {attempt.error}")
+    if result.release_log_error:
+        print(f"  {result.release_log_error}")
+    for attempt in result.writes_succeeded:
+        print(f"  OK   {attempt.label}")
+    for attempt in result.writes_failed:
+        print(f"  FAIL {attempt.label}: {attempt.error}")
+    if result.release_log_error:
+        print(f"  {result.release_log_error}")
+
+
 # ---- coverage ------------------------------------------------------------------
 
 
@@ -334,7 +409,10 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="{harvest,propose,validate,apply,coverage}")
+    subparsers = parser.add_subparsers(
+        dest="command",
+        metavar="{harvest,propose,validate,apply,coverage,provision-catalog}",
+    )
     subparsers.required = True
 
     _add_harvest_parser(subparsers)
@@ -342,6 +420,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_validate_parser(subparsers)
     _add_apply_parser(subparsers)
     _add_coverage_parser(subparsers)
+    _add_provision_catalog_parser(subparsers)
     return parser
 
 
@@ -459,6 +538,35 @@ def _add_coverage_parser(subparsers) -> None:
     )
     _add_client_args(parser)
     parser.set_defaults(handler=_cmd_coverage)
+
+
+def _add_provision_catalog_parser(subparsers) -> None:
+    parser = subparsers.add_parser(
+        "provision-catalog",
+        help="Create a catalog and its default schema from a catalog-requests/*.yaml request file.",
+        description=(
+            "Validate a catalog request, then create the catalog, its default schema and (if "
+            "declared) the catalog's sensitivity label. Refuses the whole request, writing "
+            "nothing, if it does not pass validation -- including a request file that fails to "
+            "parse at all. --dry-run prints the plan and writes nothing."
+        ),
+        epilog=(
+            'Example: ucmeta provision-catalog catalog-requests/analytics_ba10231.yaml '
+            '--approved-by "jane"'
+        ),
+    )
+    parser.add_argument("request", help="Path to the catalog request YAML to provision.")
+    parser.add_argument("--approved-by", required=True, help="Name of the human who approved this change.")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print the planned writes and exit without writing anything."
+    )
+    parser.add_argument(
+        "--log-path",
+        default=None,
+        help="Release log path to append to (default: release_log.jsonl at the repository root).",
+    )
+    _add_client_args(parser)
+    parser.set_defaults(handler=_cmd_provision_catalog)
 
 
 # ---- entry point ---------------------------------------------------------------

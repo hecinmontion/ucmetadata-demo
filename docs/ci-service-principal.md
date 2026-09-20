@@ -3,8 +3,13 @@
 What this document is for: the identity, its grants, its credential's expiry, and the
 procedure for the one manual step nothing in this repository can script (minting the
 secret and entering it into GitHub's own secret store). Spec: F-PLATFORM-003. Decision
-record: [ADR-009](ADR-009-ci-only-apply-a-machine-identity-and-a-tested-boundary.md).
+record: [ADR-009](adrs/ADR-009-ci-only-apply-a-machine-identity-and-a-tested-boundary.md).
 Re-runnable grant script: `scripts/provision_ci_apply_identity.sh`.
+
+A second, separate machine identity, `ucmeta-ci-provision`, holds the metastore-level
+privilege to create catalogs and is documented in its own sibling file,
+[`ci-service-principal-provision.md`](ci-service-principal-provision.md) (F-PLATFORM-005 /
+ADR-011) — this identity is untouched by that feature and gains nothing from it.
 
 ## Identity
 

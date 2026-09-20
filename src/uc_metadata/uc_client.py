@@ -1,13 +1,15 @@
-"""The one seam every later module (`harvest.py`, `apply.py`) talks to for Unity
-Catalog reads and writes.
+"""The one seam every later module (`harvest.py`, `apply.py`, `provision_catalog.py`)
+talks to for Unity Catalog reads and writes.
 
 `UCClient` is a `Protocol` describing that seam: list a table's columns and current
-comment, read its properties and tags, and write a comment, properties or tags back.
-Two implementations exist behind it (ADR-004): `RealUCClient`, a thin translation
-layer over `databricks-sdk` against the live Free Edition workspace, and
-`fake_uc.FakeUCClient`, a fast in-memory stand-in for unit tests. Neither module
-imports the other; both import this one, so `harvest.py`/`apply.py` can depend on
-`UCClient` alone and take either implementation as a constructor argument.
+comment, read its properties and tags, write a comment, properties or tags back, and
+-- added for `provision_catalog.py`, spec F-PLATFORM-004 -- create a catalog, create a
+schema inside it, and write a tag at catalog granularity. Two implementations exist
+behind it (ADR-004): `RealUCClient`, a thin translation layer over `databricks-sdk`
+against the live Free Edition workspace, and `fake_uc.FakeUCClient`, a fast in-memory
+stand-in for unit tests. Neither module imports the other; both import this one, so
+`harvest.py`/`apply.py`/`provision_catalog.py` can depend on `UCClient` alone and take
+either implementation as a constructor argument.
 
 Design decisions worth stating rather than leaving implicit:
 
@@ -194,6 +196,53 @@ class UCClient(Protocol):
         """
         ...
 
+    def create_catalog(self, name: str, comment: Optional[str] = None, *, dry_run: bool = False) -> str:
+        """Create a catalog named `name` if it does not already exist, optionally
+        setting its comment at creation time (added for `provision_catalog.py`,
+        spec F-PLATFORM-004). Returns the SQL executed (or, if `dry_run=True`,
+        the SQL that would be executed, with no write made).
+
+        Precondition: `name` is a legal single-part identifier (see
+        `require_single_part_name`). Postcondition: idempotent in effect --
+        calling this again for a catalog that already exists succeeds and
+        changes nothing (create-only, per Rules & Constraints: the comment is
+        never re-applied to a catalog that already exists, unlike a real
+        `CREATE CATALOG IF NOT EXISTS ... COMMENT ...` statement's own
+        no-op-on-exists semantics, which this mirrors).
+        """
+        ...
+
+    def create_schema(self, catalog_name: str, schema_name: str, *, dry_run: bool = False) -> str:
+        """Create a schema named `schema_name` inside `catalog_name` if it does
+        not already exist (added for `provision_catalog.py`, spec F-PLATFORM-004).
+        Returns the SQL executed (or, if `dry_run=True`, the SQL that would be
+        executed, with no write made).
+
+        Precondition: `catalog_name` and `schema_name` are each a legal
+        single-part identifier. Postcondition: idempotent in effect -- calling
+        this again for a schema that already exists succeeds and changes
+        nothing.
+        """
+        ...
+
+    def set_catalog_tags(self, catalog_name: str, tags: Mapping[str, str], *, dry_run: bool = False) -> str:
+        """Merge `tags` into the catalog's tags (added for
+        `provision_catalog.py`, spec F-PLATFORM-004, mirroring `set_table_tags`
+        exactly and differing only in the object it targets -- writing a tag at
+        catalog granularity is a genuinely new capability, not a variant of the
+        table-tag method). Returns the SQL executed (or, if `dry_run=True`, the
+        SQL that would be executed, with no write made).
+
+        Precondition: `catalog_name` is a legal single-part identifier;
+        `tags` is non-empty. Postcondition: existing keys not named in `tags`
+        are left untouched (merge, not replace) -- this is the create-only
+        rule's one named exception (Rules & Constraints): a request whose
+        declared sensitivity changed moves the catalog's label to the new
+        value on the next run, rather than the label being fixed forever at
+        creation time.
+        """
+        ...
+
 
 # ---- SQL-building helpers shared by both implementations (identical quoting rules
 # so the SQL strings FakeUCClient hands back for assertions look like RealUCClient's) --
@@ -205,6 +254,18 @@ def require_three_part_name(full_name: str) -> None:
     parts = full_name.split(".")
     if len(parts) != 3 or not all(part.strip() for part in parts):
         raise ValueError(f"expected a catalog.schema.table three-part name, got {full_name!r}")
+
+
+def require_single_part_name(name: str) -> None:
+    """Precondition check for a catalog or schema name (added for
+    `provision_catalog.py`, spec F-PLATFORM-004 Rules & Constraints: "every
+    name that reaches a statement builder is validated as an identifier
+    first"). Raises `ValueError` if `name` is empty or contains a `.` -- a
+    legal single-part identifier never needs to be split, and a name
+    containing a `.` would be silently mis-parsed as a multi-part name by
+    whatever eventually reads it back."""
+    if not name or not name.strip() or "." in name:
+        raise ValueError(f"expected a legal single-part identifier, got {name!r}")
 
 
 def quote_ident(identifier: str) -> str:
@@ -488,6 +549,35 @@ class RealUCClient:
 
     def insert_rows(self, full_name: str, rows: List[Mapping[str, Any]], *, dry_run: bool = False) -> str:
         sql = build_insert_sql(full_name, rows)
+        if dry_run:
+            return sql
+        self._run_statement(sql)
+        return sql
+
+    def create_catalog(self, name: str, comment: Optional[str] = None, *, dry_run: bool = False) -> str:
+        require_single_part_name(name)
+        sql = f"CREATE CATALOG IF NOT EXISTS {quote_ident(name)}"
+        if comment is not None:
+            sql += f" COMMENT {quote_literal(comment)}"
+        if dry_run:
+            return sql
+        self._run_statement(sql)
+        return sql
+
+    def create_schema(self, catalog_name: str, schema_name: str, *, dry_run: bool = False) -> str:
+        require_single_part_name(catalog_name)
+        require_single_part_name(schema_name)
+        sql = f"CREATE SCHEMA IF NOT EXISTS {quote_ident(catalog_name)}.{quote_ident(schema_name)}"
+        if dry_run:
+            return sql
+        self._run_statement(sql)
+        return sql
+
+    def set_catalog_tags(self, catalog_name: str, tags: Mapping[str, str], *, dry_run: bool = False) -> str:
+        require_single_part_name(catalog_name)
+        if not tags:
+            raise ValueError("tags must not be empty")
+        sql = f"ALTER CATALOG {quote_ident(catalog_name)} SET TAGS ({kv_clause(tags)})"
         if dry_run:
             return sql
         self._run_statement(sql)

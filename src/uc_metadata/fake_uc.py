@@ -15,9 +15,10 @@ this fake cannot quietly drift away from real Unity Catalog semantics (ADR-004).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Optional
 
 from uc_metadata.uc_client import (
+    UCClientError,
     UCColumn,
     UCTable,
     UCTableNotFoundError,
@@ -26,6 +27,7 @@ from uc_metadata.uc_client import (
     quote_full_name,
     quote_ident,
     quote_literal,
+    require_single_part_name,
     require_three_part_name,
 )
 
@@ -286,6 +288,15 @@ class FakeUCClient:
         # it back -- there is no `insert_rows`-side `get_table` equivalent,
         # because this store never claims to be a real dataset's schema.
         self._row_tables: Dict[str, List[Dict[str, Any]]] = {}
+        # In-memory backing for `create_catalog`/`create_schema`/`set_catalog_tags`
+        # (added for `provision_catalog.py`, spec F-PLATFORM-004) -- the fake had
+        # no notion of a catalog or a schema at all before this, following the
+        # same precedent `_row_tables` set: a second piece of state plus its own
+        # accessors, kept separate from `self._tables` (which models a table's
+        # own columns/comment/tags, not the catalog/schema namespace above it).
+        self._catalogs: Dict[str, Optional[str]] = {}
+        self._catalog_schemas: Dict[str, set] = {}
+        self._catalog_tags: Dict[str, Dict[str, str]] = {}
 
     # ---- reads -----------------------------------------------------------------
 
@@ -400,6 +411,75 @@ class FakeUCClient:
         a run would have appended with no network, matching this module's own
         docstring's reason for existing at all."""
         return [dict(row) for row in self._row_tables.get(full_name, [])]
+
+    # ---- catalog/schema writes (added for provision_catalog.py, F-PLATFORM-004) --
+
+    def create_catalog(self, name: str, comment: Optional[str] = None, *, dry_run: bool = False) -> str:
+        require_single_part_name(name)
+        sql = f"CREATE CATALOG IF NOT EXISTS {quote_ident(name)}"
+        if comment is not None:
+            sql += f" COMMENT {quote_literal(comment)}"
+        if dry_run:
+            return sql
+        if name not in self._catalogs:
+            # Create-only: a catalog that already exists is left exactly as it
+            # is -- the comment is never re-applied on re-run (Rules &
+            # Constraints), so this branch is the only place a comment is ever
+            # recorded at all.
+            self._catalogs[name] = comment
+            self._catalog_schemas[name] = set()
+        return sql
+
+    def create_schema(self, catalog_name: str, schema_name: str, *, dry_run: bool = False) -> str:
+        require_single_part_name(catalog_name)
+        require_single_part_name(schema_name)
+        sql = f"CREATE SCHEMA IF NOT EXISTS {quote_ident(catalog_name)}.{quote_ident(schema_name)}"
+        if dry_run:
+            return sql
+        if catalog_name not in self._catalogs:
+            # Honest failure mode for a real metastore's own referential
+            # constraint -- should never trigger in practice, since the plan
+            # always creates the catalog before the schema (provision_catalog.py),
+            # but a fake that silently accepted this would hide a real bug.
+            raise UCClientError(
+                f"cannot create schema {schema_name!r}: catalog {catalog_name!r} does not exist"
+            )
+        self._catalog_schemas.setdefault(catalog_name, set()).add(schema_name)
+        return sql
+
+    def set_catalog_tags(self, catalog_name: str, tags: Mapping[str, str], *, dry_run: bool = False) -> str:
+        require_single_part_name(catalog_name)
+        if not tags:
+            raise ValueError("tags must not be empty")
+        sql = f"ALTER CATALOG {quote_ident(catalog_name)} SET TAGS ({kv_clause(tags)})"
+        if dry_run:
+            return sql
+        if catalog_name not in self._catalogs:
+            raise UCClientError(f"cannot set tags on catalog {catalog_name!r}: it does not exist")
+        self._catalog_tags.setdefault(catalog_name, {}).update(tags)  # merge, same semantics as SET TAGS
+        return sql
+
+    def catalog_exists(self, name: str) -> bool:
+        """Test-only accessor: whether `create_catalog` has actually created
+        `name` (real writes only). Not part of `UCClient`, following the
+        `inserted_rows` precedent above."""
+        return name in self._catalogs
+
+    def catalog_comment(self, name: str) -> Optional[str]:
+        """Test-only accessor: the comment `name` was created with, or `None`
+        if it was created with no comment, or if it does not exist at all
+        (both cases the caller can already tell apart via `catalog_exists`)."""
+        return self._catalogs.get(name)
+
+    def schema_exists(self, catalog_name: str, schema_name: str) -> bool:
+        """Test-only accessor: whether `create_schema` has actually created
+        `schema_name` inside `catalog_name`."""
+        return schema_name in self._catalog_schemas.get(catalog_name, set())
+
+    def catalog_tags(self, name: str) -> Dict[str, str]:
+        """Test-only accessor: every tag `set_catalog_tags` has actually
+        written on catalog `name`, merged across every call so far."""
+        return dict(self._catalog_tags.get(name, {}))
 
     # ---- internal lookups ----------------------------------------------------
 

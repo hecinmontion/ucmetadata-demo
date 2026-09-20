@@ -36,3 +36,7 @@ schema:
   - "contracts/_template.yaml"
   - "src/uc_metadata/models.py"
   - "change_classes.yaml"
+  # Creating a top-level catalog is a bigger blast radius than a description
+  # edit -- a new metastore namespace every team can see, and nothing in this
+  # feature can remove it (F-PLATFORM-004 Rules & Constraints).
+  - "catalog-requests/**"

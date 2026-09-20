@@ -62,6 +62,16 @@ class ReleaseRecord(BaseModel):
     "something went wrong somewhere" (Rules & Constraints: the deployment outcome
     must be honest about a partial write, never silently upgraded to `success`
     or silently swallowed).
+
+    Reused, with two field meanings widened, by `provision_catalog.py` (spec
+    F-PLATFORM-004): a catalog-provisioning run's `full_name` carries the
+    catalog's name and `contract_version` carries the request-file schema
+    version (`provision_catalog.CATALOG_REQUEST_SCHEMA_VERSION`), rather than a
+    dataset's three-part name and a contract's version -- one audit trail is
+    worth more than two tidier ones (F-PLATFORM-004 Rules & Constraints). That
+    feature also adds the one field below that is additive to this record
+    (`requested_by`): existing log lines still parse, since it is optional and
+    defaults to absent, and nothing that reads the log today looks for it.
     """
 
     full_name: str = Field(min_length=1, description="The contract's catalog.schema.table identity.")
@@ -81,6 +91,15 @@ class ReleaseRecord(BaseModel):
         default_factory=list,
         description="Validation problems that caused a refusal; empty unless deployment_status is 'refused'.",
     )
+    requested_by: Optional[str] = Field(
+        default=None,
+        description=(
+            "The human who asked for this change, when that is a fact distinct from who "
+            "approved it (spec F-PLATFORM-004: a catalog request's requester). Absent for "
+            "every apply attempt that predates this field or has no separate requester to "
+            "record -- optional and additive, so existing log lines still parse."
+        ),
+    )
 
     @classmethod
     def now(
@@ -94,6 +113,7 @@ class ReleaseRecord(BaseModel):
         writes_succeeded: Optional[List[str]] = None,
         writes_failed: Optional[List[str]] = None,
         problems: Optional[List[str]] = None,
+        requested_by: Optional[str] = None,
     ) -> "ReleaseRecord":
         """Build a record timestamped at the moment of the call -- the constructor
         every apply attempt actually uses, so "when" is never a caller-supplied
@@ -108,6 +128,7 @@ class ReleaseRecord(BaseModel):
             writes_succeeded=writes_succeeded or [],
             writes_failed=writes_failed or [],
             problems=problems or [],
+            requested_by=requested_by,
         )
 
 
