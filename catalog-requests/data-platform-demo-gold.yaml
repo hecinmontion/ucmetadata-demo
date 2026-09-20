@@ -1,0 +1,9 @@
+catalog_name: data_platform_demo_gold
+business_application_id: BA-40092
+business_area: platform
+region:
+description: Third catalog provisioned end-to-end by F-PLATFORM-005's live pipeline — kept permanently as standing evidence the live path works.
+default_schema: demo
+sensitivity: internal
+requested_by: hectormb.9@gmail.com
+environment: gold
