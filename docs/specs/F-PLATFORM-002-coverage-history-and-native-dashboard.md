@@ -355,7 +355,7 @@ production consideration are stated separately.
   names, boolean fill dimensions and a simulated figure — but it is a reasonable map of which
   parts of the estate are poorly governed, which is mildly sensitive reconnaissance, so it is
   treated as internal and grant-controlled rather than open.
-- *Regulatory*: none assumed, same as F-PLATFORM-001. No validated or GxP regime is designed
+- *Regulatory*: none assumed, same as F-PLATFORM-001. No validated regime is designed
   for. The history table happens to be a durable record of when coverage changed, which would be
   useful evidence under such a regime, but that is an observation and not a design goal.
 
