@@ -13,13 +13,19 @@ signal the spec calls out ("scattered scripts read as weaker") -- the same
 reasoning cuts against reaching for a CLI framework the project doesn't
 otherwise need.
 
-`provision-catalog` (spec F-PLATFORM-004) is the one verb with no live path
-anywhere in automation: `_add_client_args` is still wired the same way every
+`provision-catalog` (spec F-PLATFORM-004) originally shipped with no live path
+anywhere in automation -- `_add_client_args` was wired the same way every
 other verb wires it, since `RealUCClient`'s three catalog-provisioning
-methods do exist and a human could still pass `--live` by hand, but
-`.github/workflows/provision-catalog.yml` never does -- see that file's own
-header comment for why creating a catalog needs a metastore-level privilege
-this repository's automation deliberately does not hold (F-PLATFORM-005).
+methods existed from the start and a human could always pass `--live` by
+hand, but `.github/workflows/provision-catalog.yml` never did, because
+creating a catalog needs a metastore-level privilege this repository's
+automation deliberately did not hold. F-PLATFORM-005 closed that gap with a
+second, provisioning-only service principal (`ucmeta-ci-provision`, not a
+widened `ucmeta-ci-apply` -- ADR-011) holding exactly that privilege and
+nothing else: `.github/workflows/provision-catalog.yml` now does pass
+`--live` when its own credential secrets are configured, live-verified
+end-to-end via a real merge, the same fork-safe/credential-gated shape
+`apply.yml` uses.
 
 Default backend, stated once here rather than left to be rediscovered per
 verb: every verb defaults to `fake_uc.FakeUCClient`, the in-repo fake

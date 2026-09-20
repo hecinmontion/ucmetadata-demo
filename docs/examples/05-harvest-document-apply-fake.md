@@ -9,7 +9,7 @@ against the default in-repo fake catalogue with zero credentials
 ## Step 1 — harvest
 
 ```
-uv run ucmeta harvest workspace.analytics.customers --ba-id BA-10231 -o examples/fixtures/customers-demo-fake.yaml
+uv run ucmeta harvest workspace.analytics.customers --ba-id BA-10231 -o docs/examples/fixtures/customers-demo-fake.yaml
 ```
 
 Fake by default (no `--live`).
@@ -17,7 +17,7 @@ Fake by default (no `--live`).
 ### Actual output
 
 ```
-Wrote a harvested skeleton contract for 'workspace.analytics.customers' to examples/fixtures/customers-demo-fake.yaml
+Wrote a harvested skeleton contract for 'workspace.analytics.customers' to docs/examples/fixtures/customers-demo-fake.yaml
 This is a skeleton: judgment fields are blank and/or carry a harvest placeholder. Run `ucmeta propose` and review before `ucmeta apply`.
 ```
 
@@ -67,7 +67,7 @@ columns:
   retention_days: 730
   certification: silver
   description: Customer master records for the direct-to-consumer storefront, documented
-    for examples/05-harvest-document-apply-fake.md.
+    for docs/examples/05-harvest-document-apply-fake.md.
 columns:
 - name: customer_id
   data_type: bigint
@@ -96,7 +96,7 @@ actually supports (see `dq_registry.yaml`'s `customers-email-present` and
 ## Step 3 — apply
 
 ```
-uv run ucmeta apply examples/fixtures/customers-demo-fake.yaml --approved-by "Demo Author"
+uv run ucmeta apply docs/examples/fixtures/customers-demo-fake.yaml --approved-by "Demo Author"
 ```
 
 Fake by default.

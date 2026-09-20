@@ -11,8 +11,8 @@ dataset:
     sla_minutes: 120
   retention_days: 730
   certification: silver
-  description: ILLUSTRATIVE description authored for examples/06-harvest-document-apply-live-dry-run.md
-    -- not submitted as this table's real live description (see that demo's "why this matters").
+  description: Customer master records for the direct-to-consumer storefront, documented
+    for docs/examples/05-harvest-document-apply-fake.md.
 columns:
 - name: customer_id
   data_type: bigint
@@ -24,8 +24,7 @@ columns:
   nullable: true
   partition_key: false
   description:
-    value: ILLUSTRATIVE column description for the same demo -- see the demo file for why this
-      is never actually applied live.
+    value: Customer's primary electronic contact address.
     ai_proposed: false
   business_term:
     value: email

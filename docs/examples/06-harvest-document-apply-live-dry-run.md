@@ -8,7 +8,7 @@ already-established live metadata.
 ## Step 1 — harvest, live (read-only)
 
 ```
-uv run ucmeta harvest workspace.analytics.customers --ba-id BA-10231 -o examples/fixtures/customers-demo-live.yaml --live --profile ucmeta
+uv run ucmeta harvest workspace.analytics.customers --ba-id BA-10231 -o docs/examples/fixtures/customers-demo-live.yaml --live --profile ucmeta
 ```
 
 `harvest` only reads the table's schema (`src/uc_metadata/harvest.py`) — no
@@ -19,7 +19,7 @@ real table.
 ### Actual output
 
 ```
-Wrote a harvested skeleton contract for 'workspace.analytics.customers' to examples/fixtures/customers-demo-live.yaml
+Wrote a harvested skeleton contract for 'workspace.analytics.customers' to docs/examples/fixtures/customers-demo-live.yaml
 This is a skeleton: judgment fields are blank and/or carry a harvest placeholder. Run `ucmeta propose` and review before `ucmeta apply`.
 ```
 
@@ -42,7 +42,7 @@ below) it is never actually submitted live:
     sla_minutes: 120
   retention_days: 730
   certification: silver
-  description: ILLUSTRATIVE description authored for examples/06-harvest-document-apply-live-dry-run.md
+  description: ILLUSTRATIVE description authored for docs/examples/06-harvest-document-apply-live-dry-run.md
     -- not submitted as this table's real live description (see that demo's "why this matters").
 columns:
 - name: customer_id
@@ -67,14 +67,14 @@ columns:
 ## Step 3 — apply, live, `--dry-run` (deliberately never dropped)
 
 ```
-uv run ucmeta apply examples/fixtures/customers-demo-live.yaml --approved-by "Demo Author" --live --profile ucmeta-ci --dry-run
+uv run ucmeta apply docs/examples/fixtures/customers-demo-live.yaml --approved-by "Demo Author" --live --profile ucmeta-ci --dry-run
 ```
 
 ### Actual output
 
 ```
 Dry run: 4 statement(s) would be applied for workspace.analytics.customers (nothing written):
-  COMMENT ON TABLE `workspace`.`analytics`.`customers` IS 'ILLUSTRATIVE description authored for examples/06-harvest-document-apply-live-dry-run.md -- not submitted as this table''s real live description (see that demo''s "why this matters").'
+  COMMENT ON TABLE `workspace`.`analytics`.`customers` IS 'ILLUSTRATIVE description authored for docs/examples/06-harvest-document-apply-live-dry-run.md -- not submitted as this table''s real live description (see that demo''s "why this matters").'
   COMMENT ON COLUMN `workspace`.`analytics`.`customers`.`email` IS 'ILLUSTRATIVE column description for the same demo -- see the demo file for why this is never actually applied live.'
   ALTER TABLE `workspace`.`analytics`.`customers` SET TBLPROPERTIES ('uc_metadata.certification' = 'silver', 'uc_metadata.retention_days' = '730', 'uc_metadata.refresh_cadence' = 'daily', 'uc_metadata.refresh_sla_minutes' = '120', 'uc_metadata.owner_business_application_id' = 'BA-10231')
   ALTER TABLE `workspace`.`analytics`.`customers` ALTER COLUMN `email` SET TAGS ('business_term' = 'email')

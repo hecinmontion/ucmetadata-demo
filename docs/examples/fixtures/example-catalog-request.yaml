@@ -2,7 +2,7 @@ catalog_name: examples_demo_catalog
 business_application_id: BA-20144
 business_area: marketing
 region:
-description: Illustrative catalog request authored for examples/01-provision-catalog-fake-success.md — not a real business need.
+description: Illustrative catalog request authored for docs/examples/01-provision-catalog-fake-success.md — not a real business need.
 default_schema: default
 sensitivity:
 requested_by: Demo Author
