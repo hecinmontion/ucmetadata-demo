@@ -12,9 +12,14 @@
   is conditional on the credential and that no secret value is ever echoed, narrowed rather than
   weakened for the two workflows where "never passes `--live`" still holds. The three CI secrets
   are now configured on the real repository (2026-09-19) and the mechanism correctly branches to
-  the live path — but that live path itself does not yet work end-to-end through GitHub Actions, a
-  real and current gap, not a hidden one: see "What is true as of 2026-09-19, and is not yet
-  closed" below.
+  the live path. **That live path now works end-to-end through GitHub Actions, as of 2026-09-20** —
+  the last remaining gap in this decision, open for a day and closed by fixing two ordinary bugs in
+  the stored CI secrets rather than anything in the design. Workflow run `35499477956` on `main`
+  (2026-09-20, ~08:53–08:54 UTC, 1m 8s) applied `contracts/demo/pipeline_runs.yaml` and
+  `contracts/demo/data_quality_checks.yaml` live as `ucmeta-ci-apply`, with every write reporting
+  `OK` for both contracts — table comment, column comments, table properties, table tags and column
+  tags. See "What was not yet working on 2026-09-19, and is now closed" below for the root cause,
+  and for what that finding does and does not prove about the original failure.
 - **Date:** 2026-09-19
 - **Decider:** hector
 - **Forward reference (added by ADR-011, F-PLATFORM-005):** a second machine identity,
@@ -271,26 +276,94 @@ first. `RealUCClient.__init__(profile=...)` already accepts an arbitrary profile
 never a code seam to close, only a decision about which profile name CI's own credential-writing
 step should use. `uc_client.py` and `cli.py` remain unchanged by this decision.
 
-### What is true as of 2026-09-19, and is not yet closed
+### What was not yet working on 2026-09-19, and is now closed
 
-The section above proves the mechanism *and* the local credential separately — it does not prove
-CI itself successfully applies live, because at the time it was written, the CI secrets were not
-yet configured. They are now (`DATABRICKS_CI_HOST` / `DATABRICKS_CI_CLIENT_ID` /
-`DATABRICKS_CI_CLIENT_SECRET`, set the same day), and the live branch of `apply.yml` genuinely does
-not work yet. Three real merges to `main`, each its own gated CI run, tried to fix it: naming
-`auth_type = oauth-m2m` explicitly, then `discovery_url` explicitly after reading the installed
-Databricks SDK's own source (`_resolve_host_metadata`, whose own comment admits it "blocks
-`Config()` initialization for ~5 minutes when the host is unreachable" when neither is set). Both
-still failed the same way — `WorkspaceClient(profile="ucmeta-ci-apply")`'s own auth resolution
-dies around the five-minute mark, specifically on the path from a GitHub-hosted runner to this
-workspace, in a way that does not reproduce locally against the identical credential (confirmed
-authenticating in under two seconds under a differently-named local profile). The credential and
-its grants are not the defect; something about Databricks SDK auth resolution on this specific
-network path is, and it is not root-caused further here — three ~5-minute CI round-trips chasing
-SDK internals stopped being proportionate for what this prototype needs to demonstrate. Recorded
-here rather than quietly reverted, for the same reason the rest of this ADR names what does not
-work: a platform whose own record of its automation quietly omits a real, current failure is
-exhibiting exactly the behaviour Layer 2 exists to make impossible for a human to get away with.
+Kept here in the past tense rather than rewritten away, on the same principle as the section above:
+the gap, what was believed about it while it was open, and what it actually turned out to be are
+all part of the record — and in this case the contrast between the three is the useful part.
+
+**What was recorded at the time, on 2026-09-19.** The section above proved the mechanism *and* the
+local credential separately — it did not prove CI itself successfully applies live, because when it
+was written the CI secrets were not yet configured. They were configured the same day
+(`DATABRICKS_CI_HOST` / `DATABRICKS_CI_CLIENT_ID` / `DATABRICKS_CI_CLIENT_SECRET`), and the live
+branch of `apply.yml` still did not work. Three real merges to `main`, each its own gated CI run,
+tried to fix it: naming `auth_type = oauth-m2m` explicitly, then `discovery_url` explicitly after
+reading the installed Databricks SDK's own source (`_resolve_host_metadata`, whose own comment
+admits it "blocks `Config()` initialization for ~5 minutes when the host is unreachable" when
+neither is set). Both still failed the same way — `WorkspaceClient(profile="ucmeta-ci-apply")`'s
+auth resolution dying around the five-minute mark, specifically on the path from a GitHub-hosted
+runner to this workspace, in a way that did not reproduce locally against the identical credential
+(confirmed authenticating in under two seconds under a differently-named local profile). The
+conclusion drawn then was that the credential and its grants were not the defect, that *"something
+about Databricks SDK auth resolution on this specific network path"* was, and that it was **not
+root-caused further here** — three ~5-minute CI round-trips chasing SDK internals had stopped being
+proportionate for what this prototype needs to demonstrate.
+
+**What it actually was: two ordinary bugs, stacked, both in the stored secrets.** Found on
+2026-09-20, when merging a pull request adding `contracts/demo/pipeline_runs.yaml` and
+`contracts/demo/data_quality_checks.yaml` — contracts for tables in a catalog provisioned through
+the F-PLATFORM-004/005 work — fired `apply.yml`'s live branch again. Neither bug was in the SDK,
+the network, the identity or its grants. They are recorded in the order they were found, because
+the second was invisible until the first was fixed.
+
+*Bug 1 — the `DATABRICKS_CI_HOST` secret's stored value had no `https://` scheme.* `apply.yml`'s
+credential-writing step builds both `host = ${DATABRICKS_CI_HOST}` and
+`discovery_url = ${DATABRICKS_CI_HOST}/oidc/.well-known/oauth-authorization-server` by direct
+string interpolation, performing no scheme normalisation of its own. The SDK's `Config` class
+auto-normalises a bare `host` to `https://<host>` internally, but does nothing of the kind for
+`discovery_url`, which it uses as a raw pass-through — so one malformed secret produced one
+repaired value and one broken one. The error output proved it rather than suggesting it: it showed
+`host=https://***` but `discovery_url=***/oidc/...`, the literal `https://` visible in the first
+and absent from the second precisely because GitHub's secret-masking could not mask a scheme that
+was not part of the registered secret string. The failure was
+`ValueError: ... oauth-m2m: Invalid URL '.../oidc/.well-known/oauth-authorization-server': No
+scheme supplied` — an immediate, clean config-construction error. Fixed by resetting the secret to
+include the scheme, matching the value the local `ucmeta` / `ucmeta-ci` profiles already used
+correctly.
+
+*Bug 2 — the `DATABRICKS_CI_CLIENT_SECRET` secret's stored value was stale or incorrect.* Only
+reachable once Bug 1 was out of the way: the run then got past config construction and into an
+actual OAuth token request, which Databricks refused with `Error: invalid_client: Client
+authentication failed`. `DATABRICKS_CI_CLIENT_ID` was independently confirmed correct
+(`d9971c7c-bdeb-4195-ac88-8964ab781a5c`, matching the live service principal), which is what
+narrowed it to the secret half of the pair. Fixed by copying the exact `client_secret` value from
+the local, already-proven-good `~/.databrickscfg` `[ucmeta-ci]` profile — the same credential that
+had been serving live `validate` and `apply --dry-run` commands all session.
+
+**The run that closed it.** Re-running the same workflow run after both fixes succeeded completely,
+for the first time ever through GitHub Actions: run `35499477956` on `main`, 2026-09-20 ~08:53–08:54
+UTC, 1m 8s, verified directly against the real run with `gh run view` and `gh run view --log`. Both
+contracts applied as `ucmeta-ci-apply`, with every write reporting `OK` for each — table comment,
+column comments, table properties, table tags, column tags. The full write set, not a partial one,
+which is the same completeness the Layer 2 section demands of its own claims.
+
+**What this does not let us claim about the original failure.** Two of these things are confirmed
+and one is a hypothesis, and they are worth separating carefully, because collapsing them would be
+the tidier story rather than the true one.
+
+*Confirmed:* these two bugs existed on 2026-09-20, in this order, and fixing both made the live path
+work end to end. *Not confirmed:* that they are the same root cause as the failure recorded on
+2026-09-19. **The symptoms do not match.** The original failure was a hang dying around the
+five-minute mark that did not reproduce locally; today's were both fast, clean, immediate errors, a
+few seconds each. There is a plausible story that connects them — a schemeless host reaching
+`_resolve_host_metadata()`'s slow fallback path, whose own source comment admits it blocks `Config()`
+initialisation for ~5 minutes when the host is unreachable, could produce a hang from the same
+malformed value that produces a fast `ValueError` under a different SDK version or different timing.
+That is a hypothesis linking two differently-shaped symptoms to one plausible shared cause. It is
+not a proven identical root cause, and it is not being asserted as one.
+
+Nor is there a defensible timeline. GitHub does not expose secret history, so there is no way to
+check whether `DATABRICKS_CI_HOST` was stored without its scheme on 2026-09-19 or was fine then and
+re-entered incorrectly at some point since. Both are consistent with everything observed. The honest
+position is that the gap is closed and the mechanism is proven, that the 2026-09-19 diagnosis was
+recorded in good faith against the evidence available at the time, and that whether it was pointing
+at these same two bugs from a different angle remains unknown.
+
+One durable property is worth leaving behind for whoever next touches this: **`apply.yml` still
+performs no scheme normalisation**, so the live path's correctness continues to depend on the stored
+secret's value being well-formed, and `discovery_url` remains the place where a malformed one
+surfaces rather than being silently repaired. That is a known, current sensitivity, not a defect
+being reported as fixed.
 
 ### What this decision explicitly does not claim
 
