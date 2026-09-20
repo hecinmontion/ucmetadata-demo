@@ -17,6 +17,11 @@
   closed" below.
 - **Date:** 2026-09-19
 - **Decider:** hector
+- **Forward reference (added by ADR-011, F-PLATFORM-005):** a second machine identity,
+  `ucmeta-ci-provision`, was later introduced to hold the metastore-level `CREATE_CATALOG`
+  privilege that catalog provisioning needs. `ucmeta-ci-apply` was not widened to hold it — see
+  [ADR-011](ADR-011-a-second-machine-identity-so-the-first-one-did-not-have-to-grow.md) — so
+  every claim below about what this identity is granted remains accurate and unamended.
 - **Affects:** the live workspace's grants and ownership on `workspace.analytics.customers`,
   `workspace.analytics.orders` and `workspace.marketing.campaigns` (**already changed**);
   `.github/workflows/apply.yml`, `tests/unit/test_workflows_yaml.py` and

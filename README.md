@@ -11,15 +11,15 @@ Design decisions live in [`docs/`](docs/) as ADRs:
 
 | ADR | Decision |
 |---|---|
-| [ADR-001](docs/ADR-001-contracts-not-catalog-editing.md) | Contracts in version control, not catalogue editing |
-| [ADR-002](docs/ADR-002-ai-proposes-humans-approve.md) | AI proposes, humans approve |
-| [ADR-003](docs/ADR-003-files-and-change-requests-not-a-ui.md) | Files and change requests, not a user interface |
-| [ADR-004](docs/ADR-004-real-free-tier-workspace-behind-a-client-shaped-interface.md) | A real free-tier Unity Catalog workspace, behind a client-shaped interface |
-| [ADR-005](docs/ADR-005-central-contract-repository.md) | One central contract repository, split later if volume proves it |
-| [ADR-006](docs/ADR-006-two-tracks-for-change.md) | Two tracks for change: content edits vs. schema/tooling changes |
-| [ADR-007](docs/ADR-007-gate-provisioning-and-grants.md) | Gate provisioning and grants, not schema changes (the forcing function) |
-| [ADR-008](docs/ADR-008-coverage-history-and-native-dashboard.md) | Coverage history as a Unity Catalog table, with a native AI/BI dashboard over it |
-| [ADR-009](docs/ADR-009-ci-only-apply-a-machine-identity-and-a-tested-boundary.md) | CI-only apply: a machine identity for the write path, and a tested boundary on the human's |
+| [ADR-001](docs/adrs/ADR-001-contracts-not-catalog-editing.md) | Contracts in version control, not catalogue editing |
+| [ADR-002](docs/adrs/ADR-002-ai-proposes-humans-approve.md) | AI proposes, humans approve |
+| [ADR-003](docs/adrs/ADR-003-files-and-change-requests-not-a-ui.md) | Files and change requests, not a user interface |
+| [ADR-004](docs/adrs/ADR-004-real-free-tier-workspace-behind-a-client-shaped-interface.md) | A real free-tier Unity Catalog workspace, behind a client-shaped interface |
+| [ADR-005](docs/adrs/ADR-005-central-contract-repository.md) | One central contract repository, split later if volume proves it |
+| [ADR-006](docs/adrs/ADR-006-two-tracks-for-change.md) | Two tracks for change: content edits vs. schema/tooling changes |
+| [ADR-007](docs/adrs/ADR-007-gate-provisioning-and-grants.md) | Gate provisioning and grants, not schema changes (the forcing function) |
+| [ADR-008](docs/adrs/ADR-008-coverage-history-and-native-dashboard.md) | Coverage history as a Unity Catalog table, with a native AI/BI dashboard over it |
+| [ADR-009](docs/adrs/ADR-009-ci-only-apply-a-machine-identity-and-a-tested-boundary.md) | CI-only apply: a machine identity for the write path, and a tested boundary on the human's |
 
 ## Problem
 

@@ -1,0 +1,58 @@
+version: 1
+dataset:
+  qualifier:
+    catalog: workspace
+    schema: analytics
+    table: customers
+  owner:
+    business_application_id: BA-10231
+  refresh:
+    cadence: daily
+    sla_minutes: 120
+  retention_days: 730
+  certification: silver
+  description: ILLUSTRATIVE description authored for examples/06-harvest-document-apply-live-dry-run.md
+    -- not submitted as this table's real live description (see that demo's "why this matters").
+columns:
+- name: customer_id
+  data_type: bigint
+  nullable: true
+  partition_key: false
+  tags: []
+- name: email
+  data_type: string
+  nullable: true
+  partition_key: false
+  description:
+    value: ILLUSTRATIVE column description for the same demo -- see the demo file for why this
+      is never actually applied live.
+    ai_proposed: false
+  business_term:
+    value: email
+    ai_proposed: false
+  tags: []
+- name: first_name
+  data_type: string
+  nullable: true
+  partition_key: false
+  tags: []
+- name: last_name
+  data_type: string
+  nullable: true
+  partition_key: false
+  tags: []
+- name: region
+  data_type: string
+  nullable: true
+  partition_key: false
+  tags: []
+- name: signup_date
+  data_type: date
+  nullable: true
+  partition_key: false
+  tags: []
+- name: lifetime_value
+  data_type: decimal(10,2)
+  nullable: true
+  partition_key: false
+  tags: []

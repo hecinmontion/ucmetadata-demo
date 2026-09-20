@@ -1,0 +1,45 @@
+# Catalog request — starter template
+#
+# Copy this file to `catalog-requests/<catalog_name>.yaml` and fill it in. Every field
+# a request may carry is present below, with a comment explaining what it means.
+# Opening this as a change request and getting it reviewed and merged *is* the
+# approval -- nothing acts on this file until it lands on main (spec F-PLATFORM-004).
+# Validated against src/uc_metadata/provision_catalog.py:CatalogRequest. Unknown
+# fields are rejected rather than ignored, so a typo'd field name fails the request
+# instead of silently doing nothing.
+#
+# What happens once this merges: the pipeline creates the catalog named below, then
+# creates `default_schema` inside it, then -- only if `sensitivity` is filled in --
+# labels the catalog with it. Nothing else: no second schema, no table, no grant.
+# Every one of those writes is harmless to re-run, so editing and re-merging this
+# file later is safe, with one exception: the sensitivity label is re-applied and
+# converges on whatever value is currently declared here, but the description is
+# never re-applied to a catalog that already exists.
+#
+# Three fields below carry a sensible starting value (catalog_name's illustrative
+# form, default_schema, environment); every other field is left blank for you to
+# fill in, including the two optional ones (region, sensitivity) -- kept present
+# rather than omitted, because a field you never see is a field you never consider.
+
+catalog_name: analytics_ba10231  # the catalog to create -- authored explicitly, never derived from the fields below
+
+business_application_id:  # resolved against the owner registry; must already be a known id (required)
+
+business_area:  # free text naming the business area this catalog serves (required)
+
+region:  # optional -- recorded only, nothing in this feature enacts it
+
+description:  # human-declared summary of what this catalog is for; becomes its comment (required)
+
+default_schema: default  # the schema created inside the catalog on day one -- required, so the
+                          # catalog is usable the moment it exists
+
+sensitivity:  # optional -- public | internal | confidential | strictly_confidential
+              # (same vocabulary a contract's dataset/column sensitivity already uses)
+
+requested_by:  # the name of the person asking for this catalog -- distinct from whoever
+               # merges the change request that approves it (required)
+
+environment: bronze  # bronze | silver | gold -- the medallion tier this catalog serves (required).
+                      # NOTE: despite the field's name, this has nothing to do with a deployment
+                      # environment (dev/staging/prod) -- see the spec's Glossary entry for why.

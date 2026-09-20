@@ -17,12 +17,25 @@ correctly on GitHub Actions; that needs a real push to a real GitHub remote,
 which is a separate, human-coordinated step (see each workflow's own header
 comment for its credential reasoning).
 
+`provision-catalog.yml` used to be credential-free by construction rather
+than by a conditional branch, because F-PLATFORM-004 shipped it with no live
+path at all. F-PLATFORM-005 gives it exactly the same conditional shape
+`apply.yml` already has, as a second, disjoint identity
+(`ucmeta-ci-provision`, not `ucmeta-ci-apply`) -- SC-005-03 requires the same
+credential-gate and fork-safety properties SC-003-04 requires of `apply.yml`,
+and the three former no-live-path assertions this module used to carry for
+this file are narrowed below into the conditional-gate and
+no-secret-echoed assertions, the same move F-PLATFORM-003 made for
+`apply.yml` when its own no-`--live` assertion first stopped being true.
+
 No spec scenario ID names workflow-YAML validity directly for `validate.yml`/
 `coverage.yml` (the Dependencies -> Build verdicts table is the source, not a
 Scenario), so those tests carry no `@pytest.mark.scenario`, matching
 `test_change_routing.py`'s precedent for ADR-derived, non-scenario-bound
 behaviour. The `apply.yml` fork-safety tests below bind to SC-003-04
-explicitly, since that scenario is exactly what they check.
+explicitly, since that scenario is exactly what they check; the
+`provision-catalog.yml` tests bind to SC-005-02/SC-005-03 for the same
+reason.
 """
 
 from __future__ import annotations
@@ -33,7 +46,7 @@ import pytest
 import yaml
 
 _WORKFLOWS_DIR = Path(__file__).resolve().parents[2] / ".github" / "workflows"
-_WORKFLOW_FILES = ["validate.yml", "apply.yml", "coverage.yml"]
+_WORKFLOW_FILES = ["validate.yml", "apply.yml", "coverage.yml", "provision-catalog.yml"]
 
 
 @pytest.mark.parametrize("filename", _WORKFLOW_FILES)
@@ -56,15 +69,17 @@ _CREDENTIAL_FREE_WORKFLOW_FILES = ["validate.yml", "coverage.yml"]
 
 @pytest.mark.parametrize("filename", _CREDENTIAL_FREE_WORKFLOW_FILES)
 def test_workflow_never_passes_live_to_ucmeta(filename):
-    """Every `ucmeta` invocation in these two workflows omits `--live`, so
-    neither can depend on a real Databricks credential -- the credential-free
-    design decision each workflow's header comment states. `apply.yml` is
-    deliberately excluded from this assertion: F-PLATFORM-003 / ADR-009
-    (Layer 1) makes it pass `--live` conditionally, as the `ucmeta-ci-apply`
-    service principal -- see the `apply.yml`-specific tests below for what
-    replaces this property for that file. Each remaining file's own header
-    comment names `--live` in prose (explaining why it is *not* used), so
-    this checks non-comment lines only, not the file as a whole."""
+    """Every `ucmeta` invocation in these workflows omits `--live`, so neither
+    can depend on a real Databricks credential -- the credential-free design
+    decision each workflow's header comment states. `apply.yml` and
+    `provision-catalog.yml` are both deliberately excluded from this
+    assertion: `apply.yml` since F-PLATFORM-003 / ADR-009 (Layer 1), and
+    `provision-catalog.yml` since F-PLATFORM-005 (ADR-011), each passes
+    `--live` conditionally, as its own credential-gated service principal --
+    see the tests specific to each file below for what replaces this
+    property. Each remaining file's own header comment names `--live` in
+    prose (explaining why it is *not* used), so this checks non-comment
+    lines only, not the file as a whole."""
     lines = (_WORKFLOWS_DIR / filename).read_text().splitlines()
     code_lines = [line for line in lines if not line.strip().startswith("#")]
 
@@ -152,3 +167,97 @@ def test_coverage_workflow_is_scheduled():
     on_section = document.get("on", document.get(True))
     assert "schedule" in on_section
     assert "workflow_dispatch" in on_section
+
+
+# ---- provision-catalog.yml (F-PLATFORM-005): a credential-gated live path -------
+#
+# F-PLATFORM-004's three no-live-path assertions ("never passes --live",
+# "states plainly it has no live path") became false the moment
+# F-PLATFORM-005 gave this workflow a live branch, and Rules & Constraints is
+# explicit that they must be *narrowed*, not deleted -- exactly the move
+# F-PLATFORM-003 made when `apply.yml`'s own no-`--live` assertion first
+# stopped being true. The three tests below are that narrowing: they mirror
+# `test_apply_workflow_live_path_is_conditional_on_credential_sc_003_04`,
+# `test_apply_workflow_has_fake_fallback_when_no_credential_sc_003_04` and
+# `test_apply_workflow_never_echoes_a_secret_value_sc_003_04` line for line,
+# against `ucmeta-ci-provision`'s credential names instead of
+# `ucmeta-ci-apply`'s.
+
+
+@pytest.mark.scenario("SC-005-01")
+def test_provision_catalog_workflow_triggers_on_push_to_main():
+    """Same trigger shape apply.yml uses: a push to main, not a pull request
+    (F-PLATFORM-004 Rules & Constraints, inherited unchanged: "the trigger is
+    a push to the main branch whose changed paths include a request file")."""
+    document = yaml.safe_load((_WORKFLOWS_DIR / "provision-catalog.yml").read_text())
+
+    on_section = document.get("on", document.get(True))
+    assert "push" in on_section
+    assert on_section["push"]["branches"] == ["main"]
+
+
+@pytest.mark.scenario("SC-005-01")
+def test_provision_catalog_workflow_excludes_its_own_template():
+    """`catalog-requests/_template.yaml` is a platform artifact, not an
+    authored request, and must never be processed as one -- the same
+    carve-out apply.yml/validate.yml already apply to the contracts
+    template, inherited unchanged from F-PLATFORM-004."""
+    contents = (_WORKFLOWS_DIR / "provision-catalog.yml").read_text()
+
+    assert "catalog-requests/_template" in contents
+
+
+@pytest.mark.scenario("SC-005-03")
+def test_provision_catalog_workflow_live_path_is_conditional_on_credential_sc_005_03():
+    """SC-005-03: a fork or clone with no CI provision credential configured
+    must not attempt a live provisioning -- the live step must be gated by an
+    `if:` condition derived from whether the credential secrets are present,
+    not run unconditionally."""
+    document = yaml.safe_load((_WORKFLOWS_DIR / "provision-catalog.yml").read_text())
+    steps = document["jobs"]["provision-catalog"]["steps"]
+
+    live_steps = [s for s in steps if "--live" in s.get("run", "")]
+    assert live_steps, "expected at least one step in provision-catalog.yml to pass --live"
+    for step in live_steps:
+        condition = step.get("if", "")
+        assert "credential" in condition and "configured" in condition, (
+            f"live step {step['name']!r} must be gated on the credential-configured "
+            "check, not run unconditionally"
+        )
+
+
+@pytest.mark.scenario("SC-005-03")
+def test_provision_catalog_workflow_has_fake_fallback_when_no_credential_sc_005_03():
+    """SC-005-03: when no CI provision credential is configured, the
+    provisioning-on-merge mechanism must still run against the
+    in-repository fake, rather than simply skipping the job -- the fallback
+    step must exist and be gated on the credential check finding nothing
+    configured."""
+    document = yaml.safe_load((_WORKFLOWS_DIR / "provision-catalog.yml").read_text())
+    steps = document["jobs"]["provision-catalog"]["steps"]
+
+    fallback_steps = [
+        s
+        for s in steps
+        if "--live" not in s.get("run", "")
+        and "credential" in s.get("if", "")
+        and "configured" in s.get("if", "")
+    ]
+    assert fallback_steps, "expected a fake-catalogue fallback step gated on the credential check"
+
+
+@pytest.mark.scenario("SC-005-03")
+def test_provision_catalog_workflow_never_echoes_a_secret_value_sc_005_03():
+    """Rules & Constraints: credentials never enter a job's printed output.
+    No `run:` block may interpolate a `secrets.*` GitHub Actions expression
+    directly into an `echo`/print -- secrets must only ever be consumed via
+    `env:`, and only ever compared or written to a file, never echoed."""
+    contents = (_WORKFLOWS_DIR / "provision-catalog.yml").read_text()
+    lines = contents.splitlines()
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if "echo" in stripped and "secrets." in stripped:
+            pytest.fail(f"a line echoes what looks like a secret value directly: {line!r}")

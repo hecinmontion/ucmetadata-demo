@@ -74,6 +74,16 @@ def test_change_classes_yaml_itself_classifies_as_schema():
     assert classify_change(["change_classes.yaml"], REPO_CHANGE_CLASSES_PATH) == "schema"
 
 
+def test_catalog_request_files_classify_as_schema():
+    """A catalog request creates a top-level namespace in the metastore that
+    every team can see and that nothing in F-PLATFORM-004 can remove -- routed
+    to the slow, platform-reviewed path on blast-radius grounds, not by
+    falling through to the unrecognized-path default (F-PLATFORM-004 Rules &
+    Constraints: "the request folder is therefore declared explicitly on the
+    slow path")."""
+    assert classify_change(["catalog-requests/analytics_ba10231.yaml"], REPO_CHANGE_CLASSES_PATH) == "schema"
+
+
 def test_classify_change_rejects_an_empty_path_list():
     """Precondition: there must be at least one changed path to classify."""
     with pytest.raises(ValueError):

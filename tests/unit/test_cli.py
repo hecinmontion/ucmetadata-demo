@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from llm_fixture_transport import build_llm_client
 from uc_metadata import cli
 from uc_metadata.fake_uc import FakeUCClient
@@ -30,6 +32,7 @@ from uc_metadata.release_log import DeploymentStatus, read_release_log
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI_PATH = REPO_ROOT / "cli" / "ucmeta"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+INVALID_CATALOG_REQUEST_FIXTURE = REPO_ROOT / "examples" / "fixtures" / "example-catalog-request-invalid.yaml"
 
 TABLE = "workspace.analytics.customers"
 KNOWN_BA_ID = "BA-10231"
@@ -220,6 +223,51 @@ def test_apply_for_real_succeeds_and_a_second_run_is_idempotent(tmp_path: Path, 
     records = read_release_log(log_path)
     assert len(records) == 2
     assert all(record.deployment_status == DeploymentStatus.SUCCESS for record in records)
+
+
+# ---- provision-catalog ------------------------------------------------------------
+
+
+@pytest.mark.scenario("SC-004-03")
+def test_provision_catalog_cli_refusal_still_appends_a_release_log_record(tmp_path: Path, capsys):
+    """Regression test: `_cmd_provision_catalog` used to call
+    `load_catalog_request` itself and short-circuit on a non-empty problem
+    list *before* ever calling `provision_catalog.provision()` -- the one
+    function that actually publishes a `ReleaseRecord`. That meant a refusal
+    reached through the real CLI (and therefore through
+    `provision-catalog.yml`'s real pipeline) printed the refusal but never
+    landed an audit-trail entry at all, silently violating SC-004-03's "a
+    record is still appended to the audit trail marking the run as refused".
+
+    Exercised through `cli.main` (not `provision_catalog.provision()`
+    directly, which `test_provision_catalog.py` already covers at the module
+    level) so this test fails if a future change reintroduces a CLI-layer
+    pre-check that bypasses `provision()` again.
+    """
+    log_path = tmp_path / "release_log.jsonl"
+
+    exit_code = cli.main(
+        [
+            "provision-catalog",
+            str(INVALID_CATALOG_REQUEST_FIXTURE),
+            "--approved-by",
+            APPROVER,
+            "--log-path",
+            str(log_path),
+        ]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "REFUSED: examples_invalid_catalog -- 1 problem(s):" in out
+    assert "no owner registered for business_application_id='BA-99999'" in out
+
+    records = read_release_log(log_path)
+    assert len(records) == 1
+    assert records[0].deployment_status == DeploymentStatus.REFUSED
+    assert records[0].full_name == "examples_invalid_catalog"
+    assert records[0].approved_by == APPROVER
+    assert any("BA-99999" in problem for problem in records[0].problems)
 
 
 # ---- coverage --------------------------------------------------------------------

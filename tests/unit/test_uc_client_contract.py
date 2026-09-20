@@ -27,7 +27,13 @@ import os
 import pytest
 
 from uc_metadata.fake_uc import FakeUCClient
-from uc_metadata.uc_client import RealUCClient, UCClient, UCTableNotFoundError
+from uc_metadata.uc_client import (
+    RealUCClient,
+    UCClient,
+    UCClientError,
+    UCTableNotFoundError,
+    require_single_part_name,
+)
 
 TABLE = "workspace.analytics.customers"
 UC_LIVE_TESTS_ENABLED = os.environ.get("UC_LIVE_TESTS") == "1"
@@ -268,3 +274,86 @@ def test_dry_run_still_enforces_preconditions(client: UCClient):
         client.set_table_properties(TABLE, {}, dry_run=True)
     with pytest.raises(ValueError):
         client.set_table_tags(TABLE, {}, dry_run=True)
+
+
+# ---- catalog/schema writes (added for provision_catalog.py, F-PLATFORM-004) -----
+#
+# Fake-only, deliberately: `RealUCClient`'s three catalog-provisioning methods
+# exist so the seam has two implementations (see uc_client.py's own docstrings),
+# but exercising them live means actually creating a catalog against the real
+# Free Edition workspace -- exactly the write F-PLATFORM-004 states plainly it
+# never performs (Rules & Constraints: "no live path in this feature -- not
+# disabled, not optional, not one flag away"). These assertions run against
+# `FakeUCClient` only, the same scope this feature's own unit tests hold to.
+
+
+def test_create_catalog_dry_run_returns_sql_without_mutating_state():
+    client = FakeUCClient()
+
+    sql = client.create_catalog("analytics_ba10231", "A test catalog.", dry_run=True)
+
+    assert "CREATE CATALOG IF NOT EXISTS" in sql
+    assert "analytics_ba10231" in sql
+    assert client.catalog_exists("analytics_ba10231") is False
+
+
+def test_create_catalog_is_idempotent_and_leaves_the_comment_from_first_creation():
+    client = FakeUCClient()
+
+    first_sql = client.create_catalog("analytics_ba10231", "First comment.")
+    client.create_catalog("analytics_ba10231", "A different comment -- must not land.")
+
+    assert "CREATE CATALOG IF NOT EXISTS" in first_sql
+    assert client.catalog_exists("analytics_ba10231") is True
+    assert client.catalog_comment("analytics_ba10231") == "First comment."
+
+
+def test_create_schema_requires_its_catalog_to_already_exist():
+    client = FakeUCClient()
+
+    with pytest.raises(UCClientError):
+        client.create_schema("does_not_exist_yet", "default")
+
+
+def test_create_schema_is_idempotent_once_its_catalog_exists():
+    client = FakeUCClient()
+    client.create_catalog("analytics_ba10231")
+
+    first_sql = client.create_schema("analytics_ba10231", "default")
+    client.create_schema("analytics_ba10231", "default")  # must not raise the second time
+
+    assert "CREATE SCHEMA IF NOT EXISTS" in first_sql
+    assert client.schema_exists("analytics_ba10231", "default") is True
+
+
+def test_set_catalog_tags_merges_without_dropping_existing_keys():
+    client = FakeUCClient()
+    client.create_catalog("analytics_ba10231")
+
+    client.set_catalog_tags("analytics_ba10231", {"sensitivity": "internal"})
+    client.set_catalog_tags("analytics_ba10231", {"owner": "customer-analytics"})
+
+    tags = client.catalog_tags("analytics_ba10231")
+    assert tags["sensitivity"] == "internal"
+    assert tags["owner"] == "customer-analytics"
+
+
+def test_set_catalog_tags_converges_on_a_changed_value():
+    """The create-only rule's single named exception: re-setting the same tag
+    key to a new value moves the catalog's label to that new value, rather
+    than the first value written winning forever (F-PLATFORM-004 Rules &
+    Constraints)."""
+    client = FakeUCClient()
+    client.create_catalog("analytics_ba10231")
+
+    client.set_catalog_tags("analytics_ba10231", {"sensitivity": "internal"})
+    client.set_catalog_tags("analytics_ba10231", {"sensitivity": "confidential"})
+
+    assert client.catalog_tags("analytics_ba10231")["sensitivity"] == "confidential"
+
+
+def test_require_single_part_name_rejects_empty_and_multi_part_names():
+    with pytest.raises(ValueError):
+        require_single_part_name("")
+    with pytest.raises(ValueError):
+        require_single_part_name("workspace.analytics")

@@ -1,0 +1,178 @@
+# Catalog-provisioning-on-merge pipeline (spec: F-PLATFORM-004, Dependencies ->
+# Build verdicts, ".github/workflows/provision-catalog.yml"; Rules & Constraints
+# "the trigger is a push to the main branch whose changed paths include a
+# request file"). Same changed-path-diff shape apply.yml already uses, filtered
+# to the request folder instead of contracts/.
+#
+# F-PLATFORM-004 shipped this workflow with no live path at all -- not
+# disabled, not one flag away, because that feature's whole point was the
+# mechanism, not the write. F-PLATFORM-005 is the live path itself: this job
+# now runs as `ucmeta-ci-provision`, a second, provisioning-only service
+# principal holding the metastore-level privilege to create catalogs and
+# nothing else (see scripts/provision_ci_provision_identity.sh and
+# docs/ci-service-principal-provision.md). `ucmeta-ci-apply` is untouched and
+# does not run this pipeline (ADR-011).
+#
+# Fork-safe by construction, the same shape apply.yml already uses
+# (SC-005-03): the "write a credentials profile, then provision --live" step
+# only runs when DATABRICKS_CI_PROVISION_HOST /
+# DATABRICKS_CI_PROVISION_CLIENT_ID / DATABRICKS_CI_PROVISION_CLIENT_SECRET
+# are all configured as repository secrets -- deliberately distinct names
+# from ucmeta-ci-apply's three, so one credential can never be pasted into
+# the other's slot unnoticed. A fork or clone with none of those configured
+# takes the other branch below: it runs the exact same provisioning-on-merge
+# mechanism against the in-repository `FakeUCClient`, states plainly that no
+# provisioning credential is configured, and still exits successfully. Which
+# branch ran is unmistakable in the job's own step list, not only in its log
+# text, and no step in this file ever echoes a secret value.
+name: provision-catalog
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  provision-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          # Full history so the pre-push SHA (github.event.before) is
+          # resolvable locally -- see the changed-file diff step below.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11" # pyproject.toml: requires-python = ">=3.11"
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      # ---- CI machine identity, wired only if it's actually configured -------
+      # Reads the three secrets into env vars (never interpolated into `if:`
+      # expressions or echoed) and reports only whether all three are
+      # present. A fork or clone with none configured gets empty env vars
+      # here and `configured=false`, which is exactly SC-005-03's case. Names
+      # are deliberately distinct from apply.yml's three
+      # (DATABRICKS_CI_HOST / DATABRICKS_CI_CLIENT_ID /
+      # DATABRICKS_CI_CLIENT_SECRET) so a credential for one identity can
+      # never be pasted into the other's slot without it being obvious.
+      - name: Check whether a CI provision credential is configured
+        id: credential
+        env:
+          DATABRICKS_CI_PROVISION_HOST: ${{ secrets.DATABRICKS_CI_PROVISION_HOST }}
+          DATABRICKS_CI_PROVISION_CLIENT_ID: ${{ secrets.DATABRICKS_CI_PROVISION_CLIENT_ID }}
+          DATABRICKS_CI_PROVISION_CLIENT_SECRET: ${{ secrets.DATABRICKS_CI_PROVISION_CLIENT_SECRET }}
+        run: |
+          if [ -n "$DATABRICKS_CI_PROVISION_HOST" ] && [ -n "$DATABRICKS_CI_PROVISION_CLIENT_ID" ] && [ -n "$DATABRICKS_CI_PROVISION_CLIENT_SECRET" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "A CI provision credential is configured; this run will provision live as ucmeta-ci-provision."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "No CI provision credential is configured (DATABRICKS_CI_PROVISION_HOST / DATABRICKS_CI_PROVISION_CLIENT_ID / DATABRICKS_CI_PROVISION_CLIENT_SECRET); this run will demonstrate the provisioning-on-merge mechanism against the in-repository fake catalogue instead."
+          fi
+
+      # Writes a `~/.databrickscfg` profile from the three secrets -- the
+      # same seam apply.yml already uses (RealUCClient.__init__ resolves an
+      # arbitrary named profile with zero code changes). Only ever runs when
+      # step `credential` found all three secrets present; never prints their
+      # values, only that the file was written. `discovery_url` is required
+      # for the same reason apply.yml's own comment records: without it,
+      # Config() initialization can block for ~5 minutes when the host is
+      # unreachable, per the installed Databricks SDK's own
+      # `_resolve_host_metadata` comment.
+      - name: Write the CI provision Databricks profile
+        if: steps.credential.outputs.configured == 'true'
+        env:
+          DATABRICKS_CI_PROVISION_HOST: ${{ secrets.DATABRICKS_CI_PROVISION_HOST }}
+          DATABRICKS_CI_PROVISION_CLIENT_ID: ${{ secrets.DATABRICKS_CI_PROVISION_CLIENT_ID }}
+          DATABRICKS_CI_PROVISION_CLIENT_SECRET: ${{ secrets.DATABRICKS_CI_PROVISION_CLIENT_SECRET }}
+        run: |
+          {
+            echo "[ucmeta-ci-provision]"
+            echo "host = ${DATABRICKS_CI_PROVISION_HOST}"
+            echo "client_id = ${DATABRICKS_CI_PROVISION_CLIENT_ID}"
+            echo "client_secret = ${DATABRICKS_CI_PROVISION_CLIENT_SECRET}"
+            echo "auth_type = oauth-m2m"
+            echo "discovery_url = ${DATABRICKS_CI_PROVISION_HOST}/oidc/.well-known/oauth-authorization-server"
+          } >> ~/.databrickscfg
+          echo "Wrote a ucmeta-ci-provision OAuth M2M profile to ~/.databrickscfg (values not printed)."
+
+      # ---- changed-file discovery -------------------------------------------
+      # Mechanism identical to apply.yml's: git diff --name-only <before>..<after>,
+      # where before/after come from the push event payload. See apply.yml's own
+      # comment for the zero-SHA/first-push guard and the squash-merge reasoning.
+      - name: List changed paths
+        id: changed
+        run: |
+          before_sha="${{ github.event.before }}"
+          after_sha="${{ github.event.after }}"
+          zero_sha="0000000000000000000000000000000000000000"
+          if [ "${before_sha}" = "${zero_sha}" ]; then
+            echo "No previous commit to diff against (first push to main); nothing to provision."
+            : > changed_paths.txt
+          else
+            git diff --name-only "${before_sha}" "${after_sha}" > changed_paths.txt
+          fi
+          echo "Changed paths in this push:"
+          cat changed_paths.txt
+
+      # Same template carve-out apply.yml/validate.yml already apply to
+      # contracts/_template.yaml -- catalog-requests/_template.yaml is a
+      # platform artifact, not an authored request, and is never provisioned.
+      - name: Find changed catalog request files
+        id: requests
+        run: |
+          grep -E '^catalog-requests/.*\.yaml$' changed_paths.txt \
+            | grep -v '^catalog-requests/_template\.yaml$' \
+            > changed_requests.txt || true
+          echo "Changed catalog request files:"
+          cat changed_requests.txt || echo "(none)"
+          count=$(wc -l < changed_requests.txt | tr -d ' ')
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+      # `--approved-by` names the human whose merge authorised this run
+      # (provision_catalog.py's own precondition) -- github.actor is the
+      # account that triggered this workflow run, the same resolution
+      # apply.yml already uses for the same reason.
+      #
+      # Added and modified request files are treated identically (Rules &
+      # Constraints, "any push, for now"): every write this pipeline performs
+      # is idempotent, so processing a modified file costs a no-op rather than
+      # a surprise.
+      #
+      # Two mutually exclusive steps below, gated on `steps.credential`'s
+      # output rather than one step branching internally, so which one ran is
+      # visible directly in the job's step list, not just in its log text
+      # (SC-005-01 / SC-005-03: "which of the two branches ran is visible in
+      # the job's own step list, not merely in its log text").
+      - name: ucmeta provision-catalog each changed request (live, as ucmeta-ci-provision)
+        if: steps.requests.outputs.count != '0' && steps.credential.outputs.configured == 'true'
+        run: |
+          echo "Provisioning live against the real Unity Catalog workspace as ucmeta-ci-provision."
+          failures=0
+          while IFS= read -r request; do
+            echo "::group::ucmeta provision-catalog ${request} --live --profile ucmeta-ci-provision"
+            uv run ucmeta provision-catalog "${request}" --live --profile ucmeta-ci-provision --approved-by "${{ github.actor }}" || failures=1
+            echo "::endgroup::"
+          done < changed_requests.txt
+          exit "${failures}"
+
+      - name: ucmeta provision-catalog each changed request (fake -- no CI credential configured)
+        if: steps.requests.outputs.count != '0' && steps.credential.outputs.configured == 'false'
+        run: |
+          echo "No CI provision credential is configured for this repository/fork."
+          echo "Demonstrating the provisioning-on-merge mechanism against the in-repository FakeUCClient instead of a real Databricks workspace. No live write is attempted."
+          failures=0
+          while IFS= read -r request; do
+            echo "::group::ucmeta provision-catalog ${request} (fake)"
+            uv run ucmeta provision-catalog "${request}" --approved-by "${{ github.actor }}" || failures=1
+            echo "::endgroup::"
+          done < changed_requests.txt
+          exit "${failures}"
+
+      - name: No catalog requests changed
+        if: steps.requests.outputs.count == '0'
+        run: echo "No catalog request files changed in this push; nothing to provision."
