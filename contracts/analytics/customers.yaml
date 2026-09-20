@@ -6,12 +6,15 @@
 # same content re-harvested and declared back into the contract.
 #
 # Also the dataset used to first prove apply.yml's live path for real. Took
-# three attempts to actually land: PR #4 surfaced the SDK's host-metadata
-# probe hanging its full 5-minute timeout on the runner network; a first
-# fix attempt (auth_type alone) didn't change that, confirmed by a second
-# failed run; setting discovery_url explicitly (see apply.yml) was the real
-# fix, verified locally against the real workspace before this third
-# attempt. This touch re-triggers the now-actually-fixed path.
+# three merges to even get this far: PR #4 surfaced the SDK's host-metadata
+# probe hanging its full 5-minute timeout on the runner network; a first fix
+# attempt (auth_type alone) didn't change that, confirmed by a second failed
+# run; setting discovery_url explicitly (see apply.yml) was believed at the
+# time to be the real fix. It wasn't, on its own -- see ADR-009's "What was
+# not yet working on 2026-09-19, and is now closed": two further, unrelated
+# bugs in the stored CI secrets (a schemeless DATABRICKS_CI_HOST, then a
+# stale DATABRICKS_CI_CLIENT_SECRET) were what actually closed the gap,
+# found and fixed 2026-09-20 while diagnosing provision-catalog.yml.
 # Proven idempotent (docs/README's own claim) -- the same COMMENT ON / SET
 # TAGS / SET TBLPROPERTIES statements are re-issued, nothing observable
 # changes on a table already fully applied.

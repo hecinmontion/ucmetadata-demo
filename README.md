@@ -222,25 +222,25 @@ are configured as repository secrets; without them (any fork) it falls back to t
 apply-on-merge mechanism against `FakeUCClient`, and which branch ran is unmistakable in the job's
 own printed output.
 
-**Those three secrets are now configured on `hecinmontion/ucmetadata-demo` (2026-09-19), and the
-live branch genuinely does not work yet — a real, open gap, not a hidden one.** Three real merges
-to `main`, each gated by CI and each a genuine attempt (not a rehearsed sequence), tried to fix it:
-naming `auth_type = oauth-m2m` explicitly, then setting `discovery_url` explicitly after reading
-the installed Databricks SDK's own source (`_resolve_host_metadata`, which the SDK's own comment
-admits "blocks `Config()` initialization for ~5 minutes when the host is unreachable" when neither
-is set). Both attempts still failed the same way: a real live-apply run against
-`workspace.analytics.customers` dies around the five-minute mark inside `WorkspaceClient(profile=
-"ucmeta-ci-apply")`'s own auth resolution, on this specific GitHub-Actions-to-Free-Edition network
-path, in a way that does not reproduce locally against the same credential (confirmed working
-in under 2 seconds from a local machine). The credential is not the problem; something about
-Databricks SDK auth resolution specifically on a GitHub-hosted runner reaching this workspace is.
-Not root-caused further — three ~5-minute CI round-trips chasing SDK internals stopped being time
-well spent for this prototype, and the honest position is naming the gap plainly rather than a
-fourth guess. The service principal's own credential values are confirmed good: constructing a
-client from them locally, under a differently-named local profile (`ucmeta-ci`, not
-`ucmeta-ci-apply` — never tested under that exact name outside CI), authenticates in under two
-seconds. It is specifically something about auth resolution on a GitHub-hosted runner reaching
-this workspace, not the credential.
+**Those three secrets are configured on `hecinmontion/ucmetadata-demo`, and the live branch now
+works end to end through GitHub Actions — closed 2026-09-20 (see ADR-009's "What was not yet
+working on 2026-09-19, and is now closed" for the full record).** The original 2026-09-19 entry
+here described a live-apply run dying around the five-minute mark inside `WorkspaceClient`'s own
+auth resolution, not reproducing locally, and left "not root-caused further" as the honest
+position at the time — three real merges (naming `auth_type = oauth-m2m`, then `discovery_url`)
+hadn't fixed it. What actually closed it, found while diagnosing a similar failure on
+`provision-catalog.yml`, was two ordinary, stacked bugs in the stored CI secrets, not the SDK or
+the network: `DATABRICKS_CI_HOST` was missing its `https://` scheme (the SDK silently repairs a
+bare `host` field internally but passes `discovery_url` through raw, so one malformed secret
+produced one working value and one broken one — `Invalid URL '.../oidc/...': No scheme supplied`),
+and, revealed only once that was fixed, `DATABRICKS_CI_CLIENT_SECRET` was stale
+(`invalid_client: Client authentication failed`, with `DATABRICKS_CI_CLIENT_ID` independently
+confirmed correct). Fixing both, a real merge's `apply.yml` run applied both changed contracts
+live as `ucmeta-ci-apply` — every write `OK` — in 1m 8s, no five-minute delay at all. Whether this
+is the *same* root cause as the original five-minute hang is deliberately not claimed as proven:
+today's failures were both fast, clean, immediate errors, not a hang, and GitHub exposes no secret
+history to confirm when the host secret actually became malformed. See the ADR for the full,
+hedged reasoning.
 
 **AI-proposed content is verified working, deliberately not baked into the shipped contracts.**
 `ucmeta propose contracts/analytics/orders.yaml --live` was run for real on 2026-09-19 against a

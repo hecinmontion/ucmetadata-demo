@@ -4,7 +4,8 @@
 # F-PLATFORM-003, expressed as a checked-in, re-runnable script rather than a
 # paragraph asserting the workspace was set up correctly.
 #
-# This is what closes ADR-009's own "What is not yet true" gap: without this
+# This is what closes ADR-009's own "What was not yet true, and is now
+# closed" gap: without this
 # file, the arrangement it describes exists only as manual changes against
 # the live workspace, and F-PLATFORM-001's disposable-workspace rule ("the
 # workspace is reclaimable and rebuildable from the repository") has exactly
