@@ -17,7 +17,11 @@ the gap is visible rather than assumed — the same discipline both solutions sh
 
 Design decisions for both solutions live under [`docs/adrs/`](docs/adrs/) as ADRs, listed below.
 How each solution is actually put together — its components, what runs where, what talks to what
-— is described in [`docs/architecture/`](docs/architecture/).
+— is described in [`docs/architecture/`](docs/architecture/). The planning specs behind both
+solutions — business context, Given/When/Then scenarios, the source of every `SC-NNN-NN` a test
+or docstring cites — are archived in [`docs/specs/`](docs/specs/), a dated snapshot from the
+project's own planning process rather than a live document; see that folder's own README for what
+that distinction means.
 
 | ADR | Decision |
 |---|---|
