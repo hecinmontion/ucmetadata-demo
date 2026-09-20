@@ -43,13 +43,15 @@ UC_LIVE_TESTS_ENABLED = os.environ.get("UC_LIVE_TESTS") == "1"
 def test_load_dq_registry_loads_every_rule_declared_in_dq_registry_yaml():
     rules = load_dq_registry()
 
-    assert len(rules) == 6
+    assert len(rules) == 10
     assert all(isinstance(rule, DQRule) for rule in rules)
     ids = {rule.id for rule in rules}
     assert "campaigns-budget-non-negative" in ids
     assert "campaigns-end-date-not-before-start-date" in ids
     assert "customers-email-present" in ids
     assert "customers-lifetime-value-non-negative" in ids
+    assert "pipeline-runs-records-processed-non-negative" in ids
+    assert "data-quality-checks-check-id-present" in ids
 
 
 def test_rules_for_table_filters_to_the_named_table_only():
