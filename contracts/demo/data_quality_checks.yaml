@@ -1,0 +1,101 @@
+# data_platform_demo.demo.data_quality_checks -- the platform's own DQ audit trail.
+# Harvested for real against the live workspace (`--live --profile ucmeta-ci`,
+# the profile backed by the `ucmeta-ci-apply` service principal -- see
+# docs/ci-service-principal.md) and hand-authored by a human throughout: every
+# judgment field below is ai_proposed: false, no AI drafter was involved.
+#
+# Sibling of pipeline_runs.yaml in this same schema (data_platform_demo.demo):
+# both exist to prove F-PLATFORM-001's harvest -> document -> validate -> apply
+# pipeline end-to-end through a real PR merge, the same way
+# provision-catalog.yml was proven with a real merge -- apply.yml's live
+# branch (as `ucmeta-ci-apply`) performs the actual write, on merge, not
+# before.
+#
+# certification: silver is a genuine evidence-backed claim, not harvest's
+# bronze placeholder relabeled -- see dq_registry.yaml's two
+# `data-quality-checks-*` rules, both of which pass against every one of this
+# table's 4 seeded rows today.
+version: 1
+dataset:
+  qualifier:
+    catalog: data_platform_demo
+    schema: demo
+    table: data_quality_checks
+  owner:
+    business_application_id: BA-40092
+  refresh:
+    cadence: daily
+    sla_minutes: 60
+  retention_days: 365
+  certification: silver
+  description: One row per data-quality rule evaluation recorded against a
+    dataset -- the platform's own audit trail of DQ check outcomes.
+  sensitivity:
+    value: internal
+    ai_proposed: false
+columns:
+- name: check_id
+  data_type: bigint
+  nullable: true
+  partition_key: false
+  description:
+    value: Surrogate primary key identifying one recorded check evaluation.
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags:
+  - primary_key
+- name: table_name
+  data_type: string
+  nullable: true
+  partition_key: false
+  description:
+    value: catalog.schema.table name of the dataset this check evaluated.
+    ai_proposed: false
+  business_term:
+    value: table_name
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: check_name
+  data_type: string
+  nullable: true
+  partition_key: false
+  pii:
+    value: false
+    ai_proposed: false
+  tags: []
+- name: passed
+  data_type: boolean
+  nullable: true
+  partition_key: false
+  description:
+    value: Whether this check's predicate held for every row it evaluated.
+    ai_proposed: false
+  business_term:
+    value: check_passed
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: checked_at
+  data_type: timestamp
+  nullable: true
+  partition_key: false
+  pii:
+    value: false
+    ai_proposed: false
+  tags: []

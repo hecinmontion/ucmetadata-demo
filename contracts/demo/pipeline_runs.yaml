@@ -1,0 +1,112 @@
+# data_platform_demo.demo.pipeline_runs -- the platform's own operational log.
+# Harvested for real against the live workspace (`--live --profile ucmeta-ci`,
+# the profile backed by the `ucmeta-ci-apply` service principal -- see
+# docs/ci-service-principal.md) and hand-authored by a human throughout: every
+# judgment field below is ai_proposed: false, no AI drafter was involved.
+#
+# This is the first real contract for a table the platform team itself owns
+# (`data_platform_demo.demo`, provisioned live by F-PLATFORM-004/005's
+# provision-catalog.yml, not by this feature) rather than one of the seeded
+# analytics/marketing demo tables. Its own apply has never run live: this file
+# exists to prove F-PLATFORM-001's harvest -> document -> validate -> apply
+# pipeline end-to-end through a real PR merge, the same way
+# provision-catalog.yml was proven with a real merge -- apply.yml's live
+# branch (as `ucmeta-ci-apply`) performs the actual write, on merge, not
+# before.
+#
+# certification: silver is a genuine evidence-backed claim, not harvest's
+# bronze placeholder relabeled -- see dq_registry.yaml's two
+# `pipeline-runs-*` rules, both of which pass against every one of this
+# table's 5 seeded rows today.
+version: 1
+dataset:
+  qualifier:
+    catalog: data_platform_demo
+    schema: demo
+    table: pipeline_runs
+  owner:
+    business_application_id: BA-40092
+  refresh:
+    cadence: daily
+    sla_minutes: 60
+  retention_days: 365
+  certification: silver
+  description: One row per pipeline execution -- the platform's own operational
+    log of harvest/coverage/provisioning runs.
+  sensitivity:
+    value: internal
+    ai_proposed: false
+columns:
+- name: pipeline_run_id
+  data_type: bigint
+  nullable: true
+  partition_key: false
+  description:
+    value: Surrogate primary key identifying one pipeline execution.
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags:
+  - primary_key
+- name: pipeline_name
+  data_type: string
+  nullable: true
+  partition_key: false
+  pii:
+    value: false
+    ai_proposed: false
+  tags: []
+- name: status
+  data_type: string
+  nullable: true
+  partition_key: false
+  description:
+    value: Terminal outcome of this run, e.g. 'succeeded' or 'failed'.
+    ai_proposed: false
+  business_term:
+    value: run_status
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []
+- name: started_at
+  data_type: timestamp
+  nullable: true
+  partition_key: false
+  pii:
+    value: false
+    ai_proposed: false
+  tags: []
+- name: finished_at
+  data_type: timestamp
+  nullable: true
+  partition_key: false
+  pii:
+    value: false
+    ai_proposed: false
+  tags: []
+- name: records_processed
+  data_type: bigint
+  nullable: true
+  partition_key: false
+  description:
+    value: Count of records this run processed. Never negative.
+    ai_proposed: false
+  business_term:
+    value: records_processed
+    ai_proposed: false
+  pii:
+    value: false
+    ai_proposed: false
+  sensitivity:
+    value: internal
+    ai_proposed: false
+  tags: []

@@ -18,7 +18,7 @@
 # full grammar and its limits): one or more clauses joined by `AND`. Each clause is
 # either `<column> IS [NOT] NULL` or `<column> <op> <value_or_column>`, where `<op>`
 # is one of `>= <= != = > <`. No `OR`, no parentheses -- every rule below is a single
-# comparison, which is all three seeded demo tables need.
+# comparison, which is all the seeded demo tables need.
 
 rules:
   - id: customers-email-present
@@ -50,3 +50,23 @@ rules:
     full_name: workspace.analytics.orders
     description: "Every order row must reference a customer_id."
     predicate: "customer_id IS NOT NULL"
+
+  - id: pipeline-runs-records-processed-non-negative
+    full_name: data_platform_demo.demo.pipeline_runs
+    description: "records_processed must never be negative."
+    predicate: "records_processed >= 0"
+
+  - id: pipeline-runs-pipeline-run-id-present
+    full_name: data_platform_demo.demo.pipeline_runs
+    description: "Every pipeline run row must have a non-null pipeline_run_id."
+    predicate: "pipeline_run_id IS NOT NULL"
+
+  - id: data-quality-checks-check-id-present
+    full_name: data_platform_demo.demo.data_quality_checks
+    description: "Every data-quality check row must have a non-null check_id."
+    predicate: "check_id IS NOT NULL"
+
+  - id: data-quality-checks-table-name-present
+    full_name: data_platform_demo.demo.data_quality_checks
+    description: "Every data-quality check row must reference a non-null table_name."
+    predicate: "table_name IS NOT NULL"

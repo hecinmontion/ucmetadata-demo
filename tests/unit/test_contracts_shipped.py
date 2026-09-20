@@ -36,7 +36,7 @@ import yaml
 
 from uc_metadata.fake_uc import FakeUCClient
 from uc_metadata.models import Contract
-from uc_metadata.validate import validate
+from uc_metadata.validate import validate, validate_yaml
 
 CONTRACTS_DIR = Path(__file__).resolve().parents[2] / "contracts"
 
@@ -45,6 +45,17 @@ CAMPAIGNS_PATH = CONTRACTS_DIR / "marketing" / "campaigns.yaml"
 ORDERS_PATH = CONTRACTS_DIR / "analytics" / "orders.yaml"
 
 ALL_SHIPPED_CONTRACT_PATHS = [CUSTOMERS_PATH, CAMPAIGNS_PATH, ORDERS_PATH]
+
+# Every real contract file that ships in this repo, discovered by glob rather than
+# hand-listed: `_template.yaml` is the starter shape, not a real dataset's contract,
+# and `_schema/` holds the JSON Schema those contracts validate against, not a
+# contract itself -- both carved out the same way `change_classes.yaml` routes them
+# to the "schema" change class in `test_change_routing.py`.
+ALL_CONTRACT_PATHS = sorted(
+    path
+    for path in CONTRACTS_DIR.rglob("*.yaml")
+    if path.name != "_template.yaml" and "_schema" not in path.parts
+)
 
 
 # ---- parsing and qualifiers -----------------------------------------------------
@@ -159,3 +170,34 @@ def test_shipped_contract_contains_no_ai_proposed_content(path: Path):
 
     contract = Contract.from_yaml(path)
     assert contract.unreviewed_field_paths == []
+
+
+# ---- safety net: every shipped contract's table resolves against FakeUCClient ---
+
+
+@pytest.mark.parametrize("path", ALL_CONTRACT_PATHS, ids=lambda p: str(p.relative_to(CONTRACTS_DIR)))
+def test_every_shipped_contract_resolves_against_fake_uc_client(path: Path):
+    """No spec scenario names this directly (ADR-004's "the fake must not drift
+    from real Unity Catalog semantics" is the source, not a Scenario), so this
+    carries no `@pytest.mark.scenario`, following `test_change_routing.py`'s
+    precedent for ADR-derived, non-scenario-bound assertions.
+
+    Regression test for the exact failure PR #12's `validate.yml` run hit:
+    `contracts/demo/pipeline_runs.yaml` and `contracts/demo/data_quality_checks.yaml`
+    were the first contracts ever written for a table outside `FakeUCClient`'s
+    three-table fixture set (`data_platform_demo.demo`, a catalog provisioned live
+    by F-PLATFORM-004/005, not by `scripts/seed_demo_data.sql`) -- `validate.yml`
+    is deliberately, permanently credential-free (F-PLATFORM-001's fork-safety
+    guarantee: it never passes `--live`), so a contract whose table the fixture
+    doesn't know about fails CI with an unhandled `UCTableNotFoundError`
+    (surfaced via `_certification_evidence_problems` -> `sample_rows`) rather
+    than a readable `FAIL` verdict. This walks every real contract under
+    `contracts/` and asserts `validate_yaml` returns a verdict -- pass or fail on
+    its merits -- without raising, so the next new table is caught here, fast
+    and offline, instead of on a real PR's CI run against a real workspace.
+    """
+    client = FakeUCClient()
+
+    result = validate_yaml(path, client)
+
+    assert isinstance(result.ok, bool)

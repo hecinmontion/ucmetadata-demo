@@ -3,9 +3,10 @@
 This is what unit tests and the default (non-`--live`) e2e run talk to (build-verdict
 table: "kept, but no longer the product's target ... so unit tests are fast, offline
 and deterministic"). It is seeded with a fixture set of tables that mirror the shape
-of the three real tables seeded into the live workspace by
-`scripts/seed_demo_data.sql` -- same names, same columns, same types -- but with no
-real data volume and no network involved.
+of the real tables seeded into the live workspace: the three `scripts/seed_demo_data.sql`
+creates, plus `data_platform_demo.demo`'s two tables (provisioned live via
+F-PLATFORM-004/005, outside that seed script) -- same names, same columns, same
+types -- but with no real data volume and no network involved.
 
 Its surface is defined entirely by `UCClient`; `tests/unit/test_uc_client_contract.py`
 runs the same behavioural assertions against this class and against `RealUCClient` so
@@ -64,7 +65,10 @@ def _default_sample_rows() -> Dict[str, List[Dict[str, Any]]]:
     """Real representative sample rows for each fixture table -- the first five rows
     `scripts/seed_demo_data.sql` inserts into the live workspace for each table,
     verified against the live workspace on 2026-09-17 (`customers`) and transcribed
-    from the seed script for `campaigns`/`orders`.
+    from the seed script for `campaigns`/`orders`. `pipeline_runs`/`data_quality_checks`
+    (added for `contracts/demo/*.yaml`, F-PLATFORM-004/005) are transcribed the same
+    way, from the rows actually seeded into `data_platform_demo.demo` -- a catalog
+    provisioned live, not by `scripts/seed_demo_data.sql`.
 
     Values are strings, matching the wire format Unity Catalog's statement execution
     API actually renders (its default `JSON_ARRAY` result format -- verified live),
@@ -212,16 +216,92 @@ def _default_sample_rows() -> Dict[str, List[Dict[str, Any]]]:
                 "channel": "mobile",
             },
         ],
+        "data_platform_demo.demo.pipeline_runs": [
+            {
+                "pipeline_run_id": "1",
+                "pipeline_name": "harvest_nightly",
+                "status": "succeeded",
+                "started_at": "2026-09-19 02:00:00",
+                "finished_at": "2026-09-19 02:04:12",
+                "records_processed": "18420",
+            },
+            {
+                "pipeline_run_id": "2",
+                "pipeline_name": "coverage_rollup",
+                "status": "succeeded",
+                "started_at": "2026-09-19 03:00:00",
+                "finished_at": "2026-09-19 03:01:03",
+                "records_processed": "3",
+            },
+            {
+                "pipeline_run_id": "3",
+                "pipeline_name": "harvest_nightly",
+                "status": "failed",
+                "started_at": "2026-09-20 02:00:00",
+                "finished_at": "2026-09-20 02:00:47",
+                "records_processed": "0",
+            },
+            {
+                "pipeline_run_id": "4",
+                "pipeline_name": "coverage_rollup",
+                "status": "succeeded",
+                "started_at": "2026-09-20 03:00:00",
+                "finished_at": "2026-09-20 03:00:58",
+                "records_processed": "3",
+            },
+            {
+                "pipeline_run_id": "5",
+                "pipeline_name": "catalog_provision",
+                "status": "succeeded",
+                "started_at": "2026-09-20 07:19:37",
+                "finished_at": "2026-09-20 07:19:45",
+                "records_processed": "1",
+            },
+        ],
+        "data_platform_demo.demo.data_quality_checks": [
+            {
+                "check_id": "1",
+                "table_name": "workspace.analytics.customers",
+                "check_name": "email_not_null",
+                "passed": "true",
+                "checked_at": "2026-09-19 03:01:00",
+            },
+            {
+                "check_id": "2",
+                "table_name": "workspace.analytics.orders",
+                "check_name": "amount_non_negative",
+                "passed": "true",
+                "checked_at": "2026-09-19 03:01:01",
+            },
+            {
+                "check_id": "3",
+                "table_name": "workspace.marketing.campaigns",
+                "check_name": "budget_non_negative",
+                "passed": "false",
+                "checked_at": "2026-09-19 03:01:02",
+            },
+            {
+                "check_id": "4",
+                "table_name": "data_platform_demo.demo.pipeline_runs",
+                "check_name": "records_processed_non_negative",
+                "passed": "true",
+                "checked_at": "2026-09-20 03:01:00",
+            },
+        ],
     }
 
 
 def default_fixture_tables() -> Dict[str, _FakeTable]:
-    """The fixture set `FakeUCClient` seeds itself with by default: the same three
-    tables `scripts/seed_demo_data.sql` creates in the live workspace, same shapes,
-    plus the first five rows each table is seeded with (`_default_sample_rows`), so
-    `sample_rows` has real representative data to hand back offline. Kept as a free
-    function (rather than inlined in `__init__`) so a test can import and mutate a
-    fresh copy without reaching into a live `FakeUCClient`.
+    """The fixture set `FakeUCClient` seeds itself with by default: the three
+    tables `scripts/seed_demo_data.sql` creates in the live workspace, plus
+    `data_platform_demo.demo`'s two tables (`pipeline_runs`,
+    `data_quality_checks` -- added for `contracts/demo/*.yaml`,
+    F-PLATFORM-004/005's first catalog provisioned outside that seed script),
+    same shapes as their live counterparts, plus the sample rows each table
+    is seeded with (`_default_sample_rows`), so `sample_rows` has real
+    representative data to hand back offline. Kept as a free function (rather
+    than inlined in `__init__`) so a test can import and mutate a fresh copy
+    without reaching into a live `FakeUCClient`.
     """
     sample_rows = _default_sample_rows()
     return {
@@ -262,6 +342,29 @@ def default_fixture_tables() -> Dict[str, _FakeTable]:
                 _column("channel", "string", 5),
             ],
             rows=sample_rows["workspace.analytics.orders"],
+        ),
+        "data_platform_demo.demo.pipeline_runs": _FakeTable(
+            comment=None,
+            columns=[
+                _column("pipeline_run_id", "bigint", 0),
+                _column("pipeline_name", "string", 1),
+                _column("status", "string", 2),
+                _column("started_at", "timestamp", 3),
+                _column("finished_at", "timestamp", 4),
+                _column("records_processed", "bigint", 5),
+            ],
+            rows=sample_rows["data_platform_demo.demo.pipeline_runs"],
+        ),
+        "data_platform_demo.demo.data_quality_checks": _FakeTable(
+            comment=None,
+            columns=[
+                _column("check_id", "bigint", 0),
+                _column("table_name", "string", 1),
+                _column("check_name", "string", 2),
+                _column("passed", "boolean", 3),
+                _column("checked_at", "timestamp", 4),
+            ],
+            rows=sample_rows["data_platform_demo.demo.data_quality_checks"],
         ),
     }
 
