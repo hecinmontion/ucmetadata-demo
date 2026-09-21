@@ -120,6 +120,44 @@ jobs:
           done < changed_contracts.txt
           exit "${failures}"
 
+      # ---- dry-run every changed catalog request, same PR-time gate as -------
+      # ---- contracts get, none of which this file previously did -------------
+      # Excludes catalog-requests/_template.yaml -- platform artifact, not an
+      # authored request, same carve-out provision-catalog.yml's own filter
+      # uses. `provision-catalog.yml` (push-triggered) still owns creating the
+      # catalog; this step exists so a request with a mistake (e.g. an
+      # unregistered business_application_id) fails the PR instead of merging
+      # green and only refusing after landing on main. `--dry-run` is the
+      # right tool: it runs `load_catalog_request`'s business-rule validation
+      # (including owner-registry resolution) and prints the planned writes,
+      # but never calls `provision()` and never touches the release log --
+      # credential-free against `FakeUCClient` by the same default every other
+      # step here uses, so it needs no `--live` and no secret. `--approved-by`
+      # is required by the CLI parser even in `--dry-run` mode, though nothing
+      # is published in that mode; `github.actor` matches the resolution
+      # `provision-catalog.yml`'s live/fake steps already use.
+      - name: Find changed catalog request files
+        id: requests
+        run: |
+          grep -E '^catalog-requests/.*\.yaml$' changed_paths.txt \
+            | grep -v '^catalog-requests/_template\.yaml$' \
+            > changed_requests.txt || true
+          echo "Changed catalog request files:"
+          cat changed_requests.txt || echo "(none)"
+          count=$(wc -l < changed_requests.txt | tr -d ' ')
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+      - name: ucmeta provision-catalog --dry-run each changed request
+        if: steps.requests.outputs.count != '0'
+        run: |
+          failures=0
+          while IFS= read -r request; do
+            echo "::group::ucmeta provision-catalog ${request} --dry-run"
+            uv run ucmeta provision-catalog "${request}" --dry-run --approved-by "${{ github.actor }}" || failures=1
+            echo "::endgroup::"
+          done < changed_requests.txt
+          exit "${failures}"
+
       # ---- the automated test suite ------------------------------------------
       # `-m "not uc_live and not llm_live"` excludes the two marker families
       # that need real credentials this workflow deliberately does not have
