@@ -1,13 +1,20 @@
--- Seeds three demo tables into the `workspace` managed catalog on a Databricks
+-- Seeds demo tables into the `workspace` managed catalog on a Databricks
 -- Free Edition workspace, standing in for datasets that already exist in a real
 -- Unity Catalog estate before this tool ever touches them.
 --
--- Three tables, three roles in the demo:
+-- Four tables, four roles in the demo:
 --   analytics.customers  -- clean, fully documented target for the happy-path walkthrough (SC-001-01)
 --   marketing.campaigns  -- fully covered but fails its DQ rules (the well-covered-but-quality-red case)
 --   analytics.orders     -- deliberately left messy/grandfathered/partially covered; `state` is an
 --                           intentionally ambiguous column name (order status vs. US state) for the
 --                           "AI confidently produces a wrong answer" Q&A moment
+--   marketing.leads       -- brand new, never harvested at seed time. Once harvested and left
+--                           unreviewed (deliberately, with no dq_registry.yaml rules registered
+--                           for it either), it's the lowest-scoring dataset the coverage dashboard
+--                           shows: has_owner=True (a human had to name a real BA id to harvest it
+--                           at all -- see coverage.py's own comment on why this is never False),
+--                           has_description/has_sensitivity/has_dq_rules all False -- 25% fill
+--                           rate, the floor given how has_owner is defined, not a literal zero.
 --
 -- Run once against the Free Edition workspace:
 --   databricks api post /api/2.0/sql/statements -p ucmeta --json @scripts/seed_demo_data_statement.json
@@ -90,3 +97,26 @@ INSERT INTO workspace.analytics.orders VALUES
   (900008, 100008, 'TX',      340.75, TIMESTAMP'2026-04-09 13:50:00', 'web'),
   (900009, 100001, 'shipped', 61.10,  TIMESTAMP'2026-04-10 15:40:00', 'mobile'),
   (900010, 100003, 'refunded',95.00,  TIMESTAMP'2026-04-11 17:00:00', 'web');
+
+-- ============================================================
+-- marketing.leads -- brand new, undiscovered dataset. No comment, no tags, no
+-- properties applied here on purpose: this is the "just showed up, nobody has
+-- touched it yet" state, contrasted against orders' "grandfathered, once
+-- touched by harvest but still unreviewed" state. Deliberately no
+-- dq_registry.yaml rule is registered for this table either.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS workspace.marketing.leads (
+  lead_id     BIGINT,
+  email       STRING,
+  source      STRING,
+  created_at  TIMESTAMP,
+  status      STRING
+) USING DELTA;
+
+INSERT INTO workspace.marketing.leads VALUES
+  (700001, 'lena.moreau@example.com',    'webinar',     TIMESTAMP'2026-05-01 09:12:00', 'new'),
+  (700002, 'ben.okafor@example.com',     'referral',    TIMESTAMP'2026-05-02 14:45:00', 'contacted'),
+  (700003, 'priya.iyer@example.com',     'organic',     TIMESTAMP'2026-05-03 08:30:00', 'new'),
+  (700004, 'tomas.vargas@example.com',   'paid_search', TIMESTAMP'2026-05-04 16:20:00', 'qualified'),
+  (700005, 'hana.kobayashi@example.com', 'webinar',     TIMESTAMP'2026-05-05 11:05:00', 'contacted'),
+  (700006, 'omar.said@example.com',      'referral',    TIMESTAMP'2026-05-06 13:40:00', 'disqualified');
