@@ -44,6 +44,9 @@ columns:
   description:
     value: Surrogate primary key identifying one customer.
     ai_proposed: false
+  business_term:
+    value: customer_id
+    ai_proposed: false
   pii:
     value: false
     ai_proposed: false
